@@ -82,7 +82,7 @@ public class JdbcToEnumerableConverter
     return super.computeSelfCost(planner, mq).multiplyBy(.1);
   }
 
-  public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
+  @Override public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
     // Generate:
     //   ResultSetEnumerable.of(schema.getDataSource(), "select ...")
     final BlockBuilder builder0 = new BlockBuilder(false);
@@ -237,7 +237,12 @@ public class JdbcToEnumerableConverter
       case TIMESTAMP:
       case DATE:
         offset = true;
+        break;
+      default:
+        break;
       }
+      break;
+    default:
       break;
     }
     final Expression source;
@@ -330,7 +335,7 @@ public class JdbcToEnumerableConverter
         new JdbcImplementor(dialect,
             (JavaTypeFactory) getCluster().getTypeFactory());
     final JdbcImplementor.Result result =
-        jdbcImplementor.visitChild(0, getInput());
+        jdbcImplementor.visitInput(this, 0);
     return result.asStatement().toSqlString(dialect);
   }
 }

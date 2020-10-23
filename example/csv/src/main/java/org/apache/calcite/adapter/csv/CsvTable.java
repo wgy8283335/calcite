@@ -16,6 +16,8 @@
  */
 package org.apache.calcite.adapter.csv;
 
+import org.apache.calcite.adapter.file.CsvEnumerator;
+import org.apache.calcite.adapter.file.CsvFieldType;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -41,7 +43,7 @@ public abstract class CsvTable extends AbstractTable {
     this.protoRowType = protoRowType;
   }
 
-  public RelDataType getRowType(RelDataTypeFactory typeFactory) {
+  @Override public RelDataType getRowType(RelDataTypeFactory typeFactory) {
     if (protoRowType != null) {
       return protoRowType.apply(typeFactory);
     }

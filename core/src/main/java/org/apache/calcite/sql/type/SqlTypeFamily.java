@@ -72,7 +72,10 @@ public enum SqlTypeFamily implements RelDataTypeFamily {
   ANY,
   CURSOR,
   COLUMN_LIST,
-  GEO;
+  GEO,
+  /** Like ANY, but do not even validate the operand. It may not be an
+   * expression. */
+  IGNORE;
 
   private static final Map<Integer, SqlTypeFamily> JDBC_TYPE_TO_FAMILY =
       ImmutableMap.<Integer, SqlTypeFamily>builder()
@@ -123,9 +126,7 @@ public enum SqlTypeFamily implements RelDataTypeFamily {
     return JDBC_TYPE_TO_FAMILY.get(jdbcType);
   }
 
-  /**
-   * @return collection of {@link SqlTypeName}s included in this family
-   */
+  /** Returns the collection of {@link SqlTypeName}s included in this family. */
   public Collection<SqlTypeName> getTypeNames() {
     switch (this) {
     case CHARACTER:
@@ -181,9 +182,7 @@ public enum SqlTypeFamily implements RelDataTypeFamily {
     }
   }
 
-  /**
-   * @return Default {@link RelDataType} belongs to this family.
-   */
+  /** Return the default {@link RelDataType} that belongs to this family. */
   public RelDataType getDefaultConcreteType(RelDataTypeFactory factory) {
     switch (this) {
     case CHARACTER:

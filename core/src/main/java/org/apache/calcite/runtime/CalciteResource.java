@@ -220,6 +220,10 @@ public interface CalciteResource {
   @BaseMessage("Column ''{0}'' is ambiguous")
   ExInst<SqlValidatorException> columnAmbiguous(String a0);
 
+  @BaseMessage("Param ''{0}'' not found in function ''{1}''; did you mean ''{2}''?")
+  ExInst<SqlValidatorException> paramNotFoundInFunctionDidYouMean(String a0,
+      String a1, String a2);
+
   @BaseMessage("Operand {0} must be a query")
   ExInst<SqlValidatorException> needQueryOp(String a0);
 
@@ -282,6 +286,9 @@ public interface CalciteResource {
 
   @BaseMessage("Table or column alias must be a simple identifier")
   ExInst<SqlValidatorException> aliasMustBeSimpleIdentifier();
+
+  @BaseMessage("Expecting alias, found character literal")
+  ExInst<SqlValidatorException> charLiteralAliasNotValid();
 
   @BaseMessage("List of column aliases must have same degree as table; table has {0,number,#} columns {1}, whereas alias list has {2,number,#} columns")
   ExInst<SqlValidatorException> aliasListDegree(int a0, String a1, int a2);
@@ -551,6 +558,9 @@ public interface CalciteResource {
   ExInst<CalciteException> illegalArgumentForTableFunctionCall(String a0,
       String a1, String a2);
 
+  @BaseMessage("Cannot call table function here: ''{0}''")
+  ExInst<CalciteException> cannotCallTableFunctionHere(String a0);
+
   @BaseMessage("''{0}'' is not a valid datetime format")
   ExInst<CalciteException> invalidDatetimeFormat(String a0);
 
@@ -712,6 +722,12 @@ public interface CalciteResource {
 
   @BaseMessage("Call to auxiliary group function ''{0}'' must have matching call to group function ''{1}'' in GROUP BY clause")
   ExInst<SqlValidatorException> auxiliaryWithoutMatchingGroupCall(String func1, String func2);
+
+  @BaseMessage("Measure expression in PIVOT must use aggregate function")
+  ExInst<SqlValidatorException> pivotAggMalformed();
+
+  @BaseMessage("Value count in PIVOT ({0,number,#}) must match number of FOR columns ({1,number,#})")
+  ExInst<SqlValidatorException> pivotValueArityMismatch(int valueCount, int forCount);
 
   @BaseMessage("Pattern variable ''{0}'' has already been defined")
   ExInst<SqlValidatorException> patternVarAlreadyDefined(String varName);
@@ -918,4 +934,7 @@ public interface CalciteResource {
 
   @BaseMessage("Invalid input for EXTRACTVALUE: xml: ''{0}'', xpath expression: ''{1}''")
   ExInst<CalciteException> invalidInputForExtractValue(String xml, String xpath);
+
+  @BaseMessage("Different length for bitwise operands: the first: {0,number,#}, the second: {1,number,#}")
+  ExInst<CalciteException> differentLengthForBitwiseOperands(int l0, int l1);
 }

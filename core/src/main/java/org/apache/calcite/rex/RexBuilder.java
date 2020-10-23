@@ -27,6 +27,7 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.runtime.FlatLists;
+import org.apache.calcite.runtime.Geometries;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.SqlIntervalQualifier;
@@ -45,13 +46,17 @@ import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.NlsString;
 import org.apache.calcite.util.Pair;
+import org.apache.calcite.util.Sarg;
 import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 import org.apache.calcite.util.Util;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
+import com.google.common.collect.ImmutableRangeSet;
+import com.google.common.collect.Range;
+import com.google.common.collect.RangeSet;
+import com.google.common.collect.TreeRangeSet;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -131,14 +136,14 @@ public class RexBuilder {
   /** Creates a list of {@link org.apache.calcite.rex.RexInputRef} expressions,
    * projecting the fields of a given record type. */
   public List<? extends RexNode> identityProjects(final RelDataType rowType) {
-    return Lists.transform(rowType.getFieldList(),
+    return Util.transform(rowType.getFieldList(),
         input -> new RexInputRef(input.getIndex(), input.getType()));
   }
 
   //~ Methods ----------------------------------------------------------------
 
   /**
-   * Returns this RexBuilder's type factory
+   * Returns this RexBuilder's type factory.
    *
    * @return type factory
    */
@@ -147,7 +152,7 @@ public class RexBuilder {
   }
 
   /**
-   * Returns this RexBuilder's operator table
+   * Returns this RexBuilder's operator table.
    *
    * @return operator table
    */
@@ -575,13 +580,22 @@ public class RexBuilder {
                 literal.getTypeName().getEndUnit().multiplier;
             value = value2.multiply(multiplier)
                 .divide(divider, 0, RoundingMode.HALF_DOWN);
+            break;
+          default:
+            break;
           }
 
           // Not all types are allowed for literals
           switch (typeName) {
           case INTEGER:
             typeName = SqlTypeName.BIGINT;
+            break;
+          default:
+            break;
           }
+          break;
+        default:
+          break;
         }
         final RexLiteral literal2 =
             makeLiteral(value, type, typeName);
@@ -648,6 +662,12 @@ public class RexBuilder {
         throw new AssertionError(toType);
       }
     }
+
+    if (toType.getSqlTypeName() == SqlTypeName.DECIMAL) {
+      final BigDecimal decimalValue = (BigDecimal) value;
+      return SqlTypeUtil.isValidDecimalValue(decimalValue, toType);
+    }
+
     return true;
   }
 
@@ -730,7 +750,7 @@ public class RexBuilder {
   }
 
   /**
-   * Retrieves an interval or decimal node's integer representation
+   * Retrieves an INTERVAL or DECIMAL node's integer representation.
    *
    * @param node the interval or decimal value as an opaque type
    * @return an integer representation of the decimal value
@@ -919,9 +939,12 @@ public class RexBuilder {
       // from the type if necessary.
       assert o instanceof NlsString;
       NlsString nlsString = (NlsString) o;
-      if ((nlsString.getCollation() == null)
-          || (nlsString.getCharset() == null)) {
-        assert type.getSqlTypeName() == SqlTypeName.CHAR;
+      if (nlsString.getCollation() == null
+          || nlsString.getCharset() == null
+          || !nlsString.getCharset().equals(type.getCharset())
+          || !nlsString.getCollation().equals(type.getCollation())) {
+        assert type.getSqlTypeName() == SqlTypeName.CHAR
+            || type.getSqlTypeName() == SqlTypeName.VARCHAR;
         assert type.getCharset().name() != null;
         assert type.getCollation() != null;
         o = new NlsString(
@@ -948,6 +971,13 @@ public class RexBuilder {
       }
       o = ((TimestampString) o).round(p);
       break;
+    default:
+      break;
+    }
+    if (typeName == SqlTypeName.DECIMAL
+        && !SqlTypeUtil.isValidDecimalValue((BigDecimal) o, type)) {
+      throw new IllegalArgumentException(
+          "Cannot convert " + o + " to " + type  + " due to overflow");
     }
     return new RexLiteral(o, type, typeName);
   }
@@ -1038,6 +1068,13 @@ public class RexBuilder {
     assert SqlTypeFamily.APPROXIMATE_NUMERIC.getTypeNames().contains(
         type.getSqlTypeName());
     return makeLiteral(bd, type, SqlTypeName.DOUBLE);
+  }
+
+  /**
+   * Creates a search argument literal.
+   */
+  public RexLiteral makeSearchArgumentLiteral(Sarg s, RelDataType type) {
+    return makeLiteral(Objects.requireNonNull(s), type, SqlTypeName.SARG);
   }
 
   /**
@@ -1135,6 +1172,7 @@ public class RexBuilder {
     return makeLiteral(str, type, SqlTypeName.CHAR);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #makeDateLiteral(DateString)}. */
   @Deprecated // to be removed before 2.0
   public RexLiteral makeDateLiteral(Calendar calendar) {
@@ -1149,6 +1187,7 @@ public class RexBuilder {
         typeFactory.createSqlType(SqlTypeName.DATE), SqlTypeName.DATE);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #makeTimeLiteral(TimeString, int)}. */
   @Deprecated // to be removed before 2.0
   public RexLiteral makeTimeLiteral(Calendar calendar, int precision) {
@@ -1175,6 +1214,7 @@ public class RexBuilder {
         SqlTypeName.TIME_WITH_LOCAL_TIME_ZONE);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #makeTimestampLiteral(TimestampString, int)}. */
   @Deprecated // to be removed before 2.0
   public RexLiteral makeTimestampLiteral(Calendar calendar, int precision) {
@@ -1227,7 +1267,7 @@ public class RexBuilder {
   }
 
   /**
-   * Creates a reference to a dynamic parameter
+   * Creates a reference to a dynamic parameter.
    *
    * @param type  Type of dynamic parameter
    * @param index Index of dynamic parameter
@@ -1257,16 +1297,122 @@ public class RexBuilder {
     return (RexLiteral) makeCast(type, constantNull);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #makeNullLiteral(RelDataType)} */
   @Deprecated // to be removed before 2.0
   public RexNode makeNullLiteral(SqlTypeName typeName, int precision) {
     return makeNullLiteral(typeFactory.createSqlType(typeName, precision));
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #makeNullLiteral(RelDataType)} */
   @Deprecated // to be removed before 2.0
   public RexNode makeNullLiteral(SqlTypeName typeName) {
     return makeNullLiteral(typeFactory.createSqlType(typeName));
+  }
+
+  /** Creates a {@link RexNode} representation a SQL "arg IN (point, ...)"
+   * expression.
+   *
+   * <p>If all of the expressions are literals, creates a call {@link Sarg}
+   * literal, "SEARCH(arg, SARG([point0..point0], [point1..point1], ...)";
+   * otherwise creates a disjunction, "arg = point0 OR arg = point1 OR ...". */
+  public RexNode makeIn(RexNode arg, List<? extends RexNode> ranges) {
+    if (areAssignable(arg, ranges)) {
+      final Sarg sarg = toSarg(Comparable.class, ranges, false);
+      if (sarg != null) {
+        final RexNode range0 = ranges.get(0);
+        return makeCall(SqlStdOperatorTable.SEARCH,
+            arg,
+            makeSearchArgumentLiteral(sarg, range0.getType()));
+      }
+    }
+    return RexUtil.composeDisjunction(this, ranges.stream()
+        .map(r -> makeCall(SqlStdOperatorTable.EQUALS, arg, r))
+        .collect(Util.toImmutableList()));
+  }
+
+  /** Returns whether and argument and bounds are have types that are
+   * sufficiently compatible to be converted to a {@link Sarg}. */
+  private boolean areAssignable(RexNode arg, List<? extends RexNode> bounds) {
+    for (RexNode bound : bounds) {
+      if (!SqlTypeUtil.inSameFamily(arg.getType(), bound.getType())
+          && !(arg.getType().isStruct() && bound.getType().isStruct())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Creates a {@link RexNode} representation a SQL
+   * "arg BETWEEN lower AND upper" expression.
+   *
+   * <p>If the expressions are all literals of compatible type, creates a call
+   * to {@link Sarg} literal, {@code SEARCH(arg, SARG([lower..upper])};
+   * otherwise creates a disjunction, {@code arg >= lower AND arg <= upper}. */
+  @SuppressWarnings("BetaApi")
+  public RexNode makeBetween(RexNode arg, RexNode lower, RexNode upper) {
+    final Comparable lowerValue = toComparable(Comparable.class, lower);
+    final Comparable upperValue = toComparable(Comparable.class, upper);
+    if (lowerValue != null
+        && upperValue != null
+        && areAssignable(arg, Arrays.asList(lower, upper))) {
+      final Sarg sarg =
+          Sarg.of(false,
+              ImmutableRangeSet.<Comparable>of(
+                  Range.closed(lowerValue, upperValue)));
+      return makeCall(SqlStdOperatorTable.SEARCH, arg,
+          makeSearchArgumentLiteral(sarg, lower.getType()));
+    }
+    return makeCall(SqlStdOperatorTable.AND,
+        makeCall(SqlStdOperatorTable.GREATER_THAN_OR_EQUAL, arg, lower),
+        makeCall(SqlStdOperatorTable.LESS_THAN_OR_EQUAL, arg, upper));
+  }
+
+  /** Converts a list of expressions to a search argument, or returns null if
+   * not possible. */
+  @SuppressWarnings({"BetaApi", "UnstableApiUsage"})
+  private static <C extends Comparable<C>> Sarg<C> toSarg(Class<C> clazz,
+      List<? extends RexNode> ranges, boolean containsNull) {
+    if (ranges.isEmpty()) {
+      // Cannot convert an empty list to a Sarg (by this interface, at least)
+      // because we use the type of the first element.
+      return null;
+    }
+    final RangeSet<C> rangeSet = TreeRangeSet.create();
+    for (RexNode range : ranges) {
+      final C value = toComparable(clazz, range);
+      if (value == null) {
+        return null;
+      }
+      rangeSet.add(Range.singleton(value));
+    }
+    return Sarg.of(containsNull, rangeSet);
+  }
+
+  private static <C extends Comparable<C>> C toComparable(Class<C> clazz,
+      RexNode point) {
+    switch (point.getKind()) {
+    case LITERAL:
+      final RexLiteral literal = (RexLiteral) point;
+      return literal.getValueAs(clazz);
+
+    case ROW:
+      final RexCall call = (RexCall) point;
+      final ImmutableList.Builder<Comparable> b = ImmutableList.builder();
+      for (RexNode operand : call.operands) {
+        //noinspection unchecked
+        final Comparable value = toComparable(Comparable.class, operand);
+        if (value == null) {
+          return null; // not a constant value
+        }
+        b.add(value);
+      }
+      return clazz.cast(FlatLists.ofComparable(b.build()));
+
+    default:
+      return null; // not a constant value
+    }
   }
 
   /**
@@ -1337,8 +1483,8 @@ public class RexBuilder {
   }
 
   /**
-   * Creates a literal of a given type. The value is assumed to be
-   * compatible with the type.
+   * Creates a literal of a given type, padding values of constant-width
+   * types to match their type.
    *
    * @param value     Value
    * @param type      Type
@@ -1348,6 +1494,32 @@ public class RexBuilder {
    */
   public RexNode makeLiteral(Object value, RelDataType type,
       boolean allowCast) {
+    return makeLiteral(value, type, allowCast, false);
+  }
+
+  /**
+   * Creates a literal of a given type. The value is assumed to be
+   * compatible with the type.
+   *
+   * <p>The {@code trim} parameter controls whether to trim values of
+   * constant-width types such as {@code CHAR}. Consider a call to
+   * {@code makeLiteral("foo ", CHAR(5)}, and note that the value is too short
+   * for its type. If {@code trim} is true, the value is converted to "foo"
+   * and the type to {@code CHAR(3)}; if {@code trim} is false, the value is
+   * right-padded with spaces to {@code "foo  "}, to match the type
+   * {@code CHAR(5)}.
+   *
+   * @param value     Value
+   * @param type      Type
+   * @param allowCast Whether to allow a cast. If false, value is always a
+   *                  {@link RexLiteral} but may not be the exact type
+   * @param trim      Whether to trim values and type to the shortest equivalent
+   *                  value; for example whether to convert CHAR(4) 'foo '
+   *                  to CHAR(3) 'foo'
+   * @return Simple literal, or cast simple literal
+   */
+  public RexNode makeLiteral(Object value, RelDataType type,
+      boolean allowCast, boolean trim) {
     if (value == null) {
       return makeCast(type, constantNull);
     }
@@ -1363,7 +1535,12 @@ public class RexBuilder {
     final SqlTypeName sqlTypeName = type.getSqlTypeName();
     switch (sqlTypeName) {
     case CHAR:
-      return makeCharLiteral(padRight((NlsString) value, type.getPrecision()));
+      final NlsString nlsString = (NlsString) value;
+      if (trim) {
+        return makeCharLiteral(nlsString.rtrim());
+      } else {
+        return makeCharLiteral(padRight(nlsString, type.getPrecision()));
+      }
     case VARCHAR:
       literal = makeCharLiteral((NlsString) value);
       if (allowCast) {
@@ -1469,6 +1646,9 @@ public class RexBuilder {
       }
       return new RexLiteral((Comparable) FlatLists.of(operands), type,
           sqlTypeName);
+    case GEOMETRY:
+      return new RexLiteral((Comparable) value, guessType(value),
+          SqlTypeName.GEOMETRY);
     case ANY:
       return makeLiteral(value, guessType(value), allowCast);
     default:
@@ -1602,6 +1782,9 @@ public class RexBuilder {
       return typeFactory.createSqlType(SqlTypeName.BINARY,
           ((ByteString) value).length());
     }
+    if (value instanceof Geometries.Geom) {
+      return typeFactory.createSqlType(SqlTypeName.GEOMETRY);
+    }
     throw new AssertionError("unknown type " + value.getClass());
   }
 
@@ -1626,7 +1809,7 @@ public class RexBuilder {
   }
 
   /** Returns a byte-string padded with zero bytes to make it at least a given
-   * length, */
+   * length. */
   private static ByteString padRight(ByteString s, int length) {
     if (s.length() >= length) {
       return s;

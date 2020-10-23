@@ -46,9 +46,14 @@ import org.apache.calcite.rel.logical.LogicalUnion;
 import org.apache.calcite.rel.logical.LogicalValues;
 import org.apache.calcite.rel.metadata.RelColumnMapping;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexCallBinding;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlOperatorBinding;
+import org.apache.calcite.sql.SqlTableFunction;
+import org.apache.calcite.sql.type.SqlReturnTypeInference;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.util.ImmutableBitSet;
@@ -167,7 +172,7 @@ public class RelFactories {
    * {@link org.apache.calcite.rel.logical.LogicalProject}.
    */
   private static class ProjectFactoryImpl implements ProjectFactory {
-    public RelNode createProject(RelNode input, List<RelHint> hints,
+    @Override public RelNode createProject(RelNode input, List<RelHint> hints,
         List<? extends RexNode> childExprs, List<String> fieldNames) {
       return LogicalProject.create(input, hints, childExprs, fieldNames);
     }
@@ -194,7 +199,7 @@ public class RelFactories {
    * returns a vanilla {@link Sort}.
    */
   private static class SortFactoryImpl implements SortFactory {
-    public RelNode createSort(RelNode input, RelCollation collation,
+    @Override public RelNode createSort(RelNode input, RelCollation collation,
         RexNode offset, RexNode fetch) {
       return LogicalSort.create(input, collation, offset, fetch);
     }
@@ -205,7 +210,7 @@ public class RelFactories {
    * of the appropriate type for a rule's calling convention.
    */
   public interface ExchangeFactory {
-    /** Creates a Exchange. */
+    /** Creates an Exchange. */
     RelNode createExchange(RelNode input, RelDistribution distribution);
   }
 
@@ -265,7 +270,7 @@ public class RelFactories {
    * operation (UNION, EXCEPT, INTERSECT).
    */
   private static class SetOpFactoryImpl implements SetOpFactory {
-    public RelNode createSetOp(SqlKind kind, List<RelNode> inputs,
+    @Override public RelNode createSetOp(SqlKind kind, List<RelNode> inputs,
         boolean all) {
       switch (kind) {
       case UNION:
@@ -295,7 +300,7 @@ public class RelFactories {
    * that returns a vanilla {@link LogicalAggregate}.
    */
   private static class AggregateFactoryImpl implements AggregateFactory {
-    public RelNode createAggregate(RelNode input, List<RelHint> hints,
+    @Override public RelNode createAggregate(RelNode input, List<RelHint> hints,
         ImmutableBitSet groupSet, ImmutableList<ImmutableBitSet> groupSets,
         List<AggregateCall> aggCalls) {
       return LogicalAggregate.create(input, hints, groupSet, groupSets, aggCalls);
@@ -334,7 +339,7 @@ public class RelFactories {
    * returns a vanilla {@link LogicalFilter}.
    */
   private static class FilterFactoryImpl implements FilterFactory {
-    public RelNode createFilter(RelNode input, RexNode condition,
+    @Override public RelNode createFilter(RelNode input, RexNode condition,
         Set<CorrelationId> variablesSet) {
       return LogicalFilter.create(input, condition,
           ImmutableSet.copyOf(variablesSet));
@@ -371,7 +376,7 @@ public class RelFactories {
    * {@link org.apache.calcite.rel.logical.LogicalJoin}.
    */
   private static class JoinFactoryImpl implements JoinFactory {
-    public RelNode createJoin(RelNode left, RelNode right, List<RelHint> hints,
+    @Override public RelNode createJoin(RelNode left, RelNode right, List<RelHint> hints,
         RexNode condition, Set<CorrelationId> variablesSet,
         JoinRelType joinType, boolean semiJoinDone) {
       return LogicalJoin.create(left, right, hints, condition, variablesSet, joinType,
@@ -405,7 +410,7 @@ public class RelFactories {
    * {@link org.apache.calcite.rel.logical.LogicalCorrelate}.
    */
   private static class CorrelateFactoryImpl implements CorrelateFactory {
-    public RelNode createCorrelate(RelNode left, RelNode right,
+    @Override public RelNode createCorrelate(RelNode left, RelNode right,
         CorrelationId correlationId, ImmutableBitSet requiredColumns,
         JoinRelType joinType) {
       return LogicalCorrelate.create(left, right, correlationId,
@@ -432,21 +437,6 @@ public class RelFactories {
   }
 
   /**
-   * Implementation of {@link SemiJoinFactory} that returns a vanilla
-   * {@link Join} with join type as {@link JoinRelType#SEMI}.
-   *
-   * @deprecated Use {@link JoinFactoryImpl} instead.
-   */
-  @Deprecated  // to be removed before 2.0
-  private static class SemiJoinFactoryImpl implements SemiJoinFactory {
-    public RelNode createSemiJoin(RelNode left, RelNode right,
-        RexNode condition) {
-      return LogicalJoin.create(left, right, ImmutableList.of(), condition,
-          ImmutableSet.of(), JoinRelType.SEMI, false, ImmutableList.of());
-    }
-  }
-
-  /**
    * Can create a {@link Values} of the appropriate type for a rule's calling
    * convention.
    */
@@ -463,7 +453,7 @@ public class RelFactories {
    * {@link LogicalValues}.
    */
   private static class ValuesFactoryImpl implements ValuesFactory {
-    public RelNode createValues(RelOptCluster cluster, RelDataType rowType,
+    @Override public RelNode createValues(RelOptCluster cluster, RelDataType rowType,
         List<ImmutableList<RexLiteral>> tuples) {
       return LogicalValues.create(cluster, rowType,
           ImmutableList.copyOf(tuples));
@@ -486,7 +476,7 @@ public class RelFactories {
    * {@link LogicalTableScan}.
    */
   private static class TableScanFactoryImpl implements TableScanFactory {
-    public RelNode createScan(RelOptTable.ToRelContext toRelContext, RelOptTable table) {
+    @Override public RelNode createScan(RelOptTable.ToRelContext toRelContext, RelOptTable table) {
       return table.toRel(toRelContext);
     }
   }
@@ -498,7 +488,7 @@ public class RelFactories {
   public interface TableFunctionScanFactory {
     /** Creates a {@link TableFunctionScan}. */
     RelNode createTableFunctionScan(RelOptCluster cluster,
-        List<RelNode> inputs, RexNode rexCall, Type elementType,
+        List<RelNode> inputs, RexCall call, Type elementType,
         Set<RelColumnMapping> columnMappings);
   }
 
@@ -510,10 +500,28 @@ public class RelFactories {
   private static class TableFunctionScanFactoryImpl
       implements TableFunctionScanFactory {
     @Override public RelNode createTableFunctionScan(RelOptCluster cluster,
-        List<RelNode> inputs, RexNode rexCall, Type elementType,
+        List<RelNode> inputs, RexCall call, Type elementType,
         Set<RelColumnMapping> columnMappings) {
-      return LogicalTableFunctionScan.create(cluster, inputs, rexCall,
-          elementType, rexCall.getType(), columnMappings);
+      final RelDataType rowType;
+      // To deduce the return type:
+      // 1. if the operator implements SqlTableFunction,
+      // use the SqlTableFunction's return type inference;
+      // 2. else use the call's type, e.g. the operator may has
+      // its custom way for return type inference.
+      if (call.getOperator() instanceof SqlTableFunction) {
+        final SqlOperatorBinding callBinding =
+            new RexCallBinding(cluster.getTypeFactory(), call.getOperator(),
+                call.operands, ImmutableList.of());
+        final SqlTableFunction operator = (SqlTableFunction) call.getOperator();
+        final SqlReturnTypeInference rowTypeInference =
+            operator.getRowTypeInference();
+        rowType = rowTypeInference.inferReturnType(callBinding);
+      } else {
+        rowType = call.getType();
+      }
+
+      return LogicalTableFunctionScan.create(cluster, inputs, call,
+          elementType, rowType, columnMappings);
     }
   }
 
@@ -533,7 +541,7 @@ public class RelFactories {
    * returns a vanilla {@link LogicalSnapshot}.
    */
   public static class SnapshotFactoryImpl implements SnapshotFactory {
-    public RelNode createSnapshot(RelNode input, RexNode period) {
+    @Override public RelNode createSnapshot(RelNode input, RexNode period) {
       return LogicalSnapshot.create(input, period);
     }
   }
@@ -557,7 +565,7 @@ public class RelFactories {
    * that returns a {@link LogicalMatch}.
    */
   private static class MatchFactoryImpl implements MatchFactory {
-    public RelNode createMatch(RelNode input, RexNode pattern,
+    @Override public RelNode createMatch(RelNode input, RexNode pattern,
         RelDataType rowType, boolean strictStart, boolean strictEnd,
         Map<String, RexNode> patternDefinitions, Map<String, RexNode> measures,
         RexNode after, Map<String, ? extends SortedSet<String>> subsets,
@@ -585,7 +593,7 @@ public class RelFactories {
    * that returns Logical Spools.
    */
   private static class SpoolFactoryImpl implements SpoolFactory {
-    public RelNode createTableSpool(RelNode input, Spool.Type readType,
+    @Override public RelNode createTableSpool(RelNode input, Spool.Type readType,
         Spool.Type writeType, RelOptTable table) {
       return LogicalTableSpool.create(input, readType, writeType, table);
     }
@@ -607,7 +615,7 @@ public class RelFactories {
    * that returns a {@link LogicalRepeatUnion}.
    */
   private static class RepeatUnionFactoryImpl implements RepeatUnionFactory {
-    public RelNode createRepeatUnion(RelNode seed, RelNode iterative,
+    @Override public RelNode createRepeatUnion(RelNode seed, RelNode iterative,
         boolean all, int iterationLimit) {
       return LogicalRepeatUnion.create(seed, iterative, all, iterationLimit);
     }

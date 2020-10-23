@@ -16,54 +16,50 @@
  */
 package org.apache.calcite.sql;
 
-import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.sql.type.SqlOperandCountRanges;
-import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.calcite.sql.type.SqlTypeUtil;
-import org.apache.calcite.sql.validate.SqlValidator;
+import com.google.common.collect.ImmutableList;
 
 /**
- * SqlHopTableFunction implements an operator for hopping. It allows four parameters:
- * 1. a table.
- * 2. a descriptor to provide a watermarked column name from the input table.
- * 3. an interval parameter to specify the length of window shifting.
- * 4. an interval parameter to specify the length of window size.
+ * SqlHopTableFunction implements an operator for hopping.
+ *
+ * <p>It allows four parameters:
+ *
+ * <ol>
+ *   <li>a table</li>
+ *   <li>a descriptor to provide a watermarked column name from the input table</li>
+ *   <li>an interval parameter to specify the length of window shifting</li>
+ *   <li>an interval parameter to specify the length of window size</li>
+ * </ol>
  */
 public class SqlHopTableFunction extends SqlWindowTableFunction {
   public SqlHopTableFunction() {
-    super(SqlKind.HOP.name());
+    super(SqlKind.HOP.name(), new OperandMetadataImpl());
   }
 
-  @Override public SqlOperandCountRange getOperandCountRange() {
-    return SqlOperandCountRanges.of(4);
-  }
+  /** Operand type checker for HOP. */
+  private static class OperandMetadataImpl extends AbstractOperandMetadata {
+    OperandMetadataImpl() {
+      super(
+          ImmutableList.of(PARAM_DATA, PARAM_TIMECOL, PARAM_SLIDE,
+              PARAM_SIZE, PARAM_OFFSET), 4);
+    }
 
-  @Override public boolean checkOperandTypes(SqlCallBinding callBinding,
-      boolean throwOnFailure) {
-    final SqlNode operand0 = callBinding.operand(0);
-    final SqlValidator validator = callBinding.getValidator();
-    final RelDataType type = validator.getValidatedNodeType(operand0);
-    if (type.getSqlTypeName() != SqlTypeName.ROW) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+    @Override public boolean checkOperandTypes(SqlCallBinding callBinding,
+        boolean throwOnFailure) {
+      if (!checkTableAndDescriptorOperands(callBinding, 1)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      if (!checkTimeColumnDescriptorOperand(callBinding, 1)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      if (!checkIntervalOperands(callBinding, 2)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      return true;
     }
-    final SqlNode operand1 = callBinding.operand(1);
-    if (operand1.getKind() != SqlKind.DESCRIPTOR) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    validateColumnNames(validator, type.getFieldNames(), ((SqlCall) operand1).getOperandList());
-    final RelDataType type2 = validator.getValidatedNodeType(callBinding.operand(2));
-    if (!SqlTypeUtil.isInterval(type2)) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    final RelDataType type3 = validator.getValidatedNodeType(callBinding.operand(3));
-    if (!SqlTypeUtil.isInterval(type3)) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    return true;
-  }
 
-  @Override public String getAllowedSignatures(String opNameToUse) {
-    return getName() + "(TABLE table_name, DESCRIPTOR(col), "
-        + "datetime interval, datetime interval)";
+    @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+      return opName + "(TABLE table_name, DESCRIPTOR(timecol), "
+          + "datetime interval, datetime interval[, datetime interval])";
+    }
   }
 }

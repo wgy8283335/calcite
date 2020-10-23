@@ -31,6 +31,7 @@ import org.apache.calcite.runtime.SqlFunctions;
 import org.apache.calcite.runtime.Utilities;
 import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.sql.dialect.CalciteSqlDialect;
+import org.apache.calcite.sql.util.IdPair;
 import org.apache.calcite.sql.util.SqlBuilder;
 import org.apache.calcite.sql.util.SqlString;
 import org.apache.calcite.test.DiffTestCase;
@@ -38,7 +39,9 @@ import org.apache.calcite.test.Matchers;
 import org.apache.calcite.testlib.annotations.LocaleEnUs;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultiset;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Ints;
@@ -47,9 +50,12 @@ import org.hamcrest.Description;
 import org.hamcrest.Matcher;
 import org.hamcrest.StringDescription;
 import org.hamcrest.TypeSafeMatcher;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.io.PrintWriter;
+import java.io.Serializable;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.lang.management.MemoryType;
@@ -58,6 +64,8 @@ import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
+import java.time.DayOfWeek;
+import java.time.temporal.TemporalAccessor;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -82,7 +90,6 @@ import java.util.Properties;
 import java.util.Random;
 import java.util.RandomAccess;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TimeZone;
 import java.util.TreeSet;
@@ -90,6 +97,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.ObjIntConsumer;
+import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 
 import static org.apache.calcite.test.Matchers.isLinux;
 
@@ -104,6 +113,8 @@ import static org.hamcrest.CoreMatchers.startsWith;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -546,6 +557,40 @@ class UtilTest {
     }
   }
 
+  /** Tests {@link Util#printList(StringBuilder, int, ObjIntConsumer)}. */
+  @Test void testPrintList() {
+    final StringBuilder sb = new StringBuilder();
+    Util.printList(sb, 0, (sb2, i) -> sb2.append(i * 2 + 1));
+    assertThat(sb.toString(), is("[]"));
+    sb.setLength(0);
+
+    Util.printList(sb, 1, (sb2, i) -> sb2.append(i * 2 + 1));
+    assertThat(sb.toString(), is("[1]"));
+    sb.setLength(0);
+
+    Util.printList(sb, 3, (sb2, i) -> sb2.append(i * 2 + 1));
+    assertThat(sb.toString(), is("[1, 3, 5]"));
+    sb.setLength(0);
+  }
+
+  /** Tests {@link Util#printIterable(StringBuilder, Iterable)}. */
+  @Test void testPrintIterable() {
+    final StringBuilder sb = new StringBuilder();
+    final Set<String> beatles =
+        new LinkedHashSet<>(Arrays.asList("John", "Paul", "George", "Ringo"));
+    Util.printIterable(sb, beatles);
+    assertThat(sb.toString(), is("[John, Paul, George, Ringo]"));
+    sb.setLength(0);
+
+    Util.printIterable(sb, ImmutableSet.of("abc"));
+    assertThat(sb.toString(), is("[abc]"));
+    sb.setLength(0);
+
+    Util.printIterable(sb, ImmutableList.of());
+    assertThat(sb.toString(), is("[]"));
+    sb.setLength(0);
+  }
+
   /**
    * Tests the difference engine, {@link DiffTestCase#diff}.
    */
@@ -929,6 +974,10 @@ class UtilTest {
     List<String> strings = Arrays.asList("paul", "george", "john", "ringo");
     List<Integer> integers = Arrays.asList(1942, 1943, 1940);
 
+    final List<Pair<String, Integer>> pairs =
+        Pair.zip(strings, integers, false);
+    final Map<String, Integer> map = ImmutableMap.copyOf(pairs);
+
     // shorter list on the right
     final AtomicInteger size = new AtomicInteger();
     Pair.forEach(strings, integers, (s, i) -> size.incrementAndGet());
@@ -943,6 +992,16 @@ class UtilTest {
     size.set(0);
     Pair.forEach(strings, strings, (s1, s2) -> size.incrementAndGet());
     assertThat(size.get(), is(4));
+
+    // same, using a list of pairs
+    size.set(0);
+    Pair.forEach(pairs, (s, i) -> size.incrementAndGet());
+    assertThat(size.get(), is(3));
+
+    // same, using a map
+    size.set(0);
+    map.forEach((s, i) -> size.incrementAndGet());
+    assertThat(size.get(), is(3));
 
     // empty on left
     size.set(0);
@@ -966,11 +1025,33 @@ class UtilTest {
         (s, i) -> size.incrementAndGet());
     assertThat(size.get(), is(0));
 
+    // empty list of pairs
+    size.set(0);
+    Pair.forEach(Util.first(pairs, 0), (s, i) -> size.incrementAndGet());
+    assertThat(size.get(), is(0));
+
+    // empty map
+    size.set(0);
+    ImmutableMap.of().forEach((s, i) -> size.incrementAndGet());
+    assertThat(size.get(), is(0));
+
     // build a string
     final StringBuilder b = new StringBuilder();
     Pair.forEach(strings, integers,
         (s, i) -> b.append(s).append(":").append(i).append(";"));
-    assertThat(b.toString(), is("paul:1942;george:1943;john:1940;"));
+    final String expected = "paul:1942;george:1943;john:1940;";
+    assertThat(b.toString(), is(expected));
+
+    // same, using list of pairs
+    b.setLength(0);
+    Pair.forEach(pairs,
+        (s, i) -> b.append(s).append(":").append(i).append(";"));
+    assertThat(b.toString(), is(expected));
+
+    // same, using map
+    b.setLength(0);
+    map.forEach((s, i) -> b.append(s).append(":").append(i).append(";"));
+    assertThat(b.toString(), is(expected));
   }
 
   /**
@@ -1113,6 +1194,51 @@ class UtilTest {
     assertThat(list2.appendAll(list), sameInstance(list2));
     //noinspection CollectionAddedToSelf
     assertThat(list2.appendAll(list2), is(Arrays.asList(1, 3, 5, 1, 3, 5)));
+    assertThat(
+        Arrays.toString(ImmutableIntList.of(1).toArray(new Integer[]{5, 6, 7})),
+        is("[1, null, 7]")
+    );
+  }
+
+  /** Unit test for {@link IdPair}. */
+  @Test void testIdPair() {
+    final IdPair<Integer, Integer> p0OneTwo = IdPair.of(1, 2);
+    final IdPair<Integer, Integer> p1OneTwo = IdPair.of(1, 2);
+    final IdPair<Integer, Integer> p1TwoOne = IdPair.of(2, 1);
+    assertEquals(p0OneTwo, p0OneTwo);
+    assertEquals(p0OneTwo, p1OneTwo);
+    assertEquals(p0OneTwo.hashCode(), p1OneTwo.hashCode());
+    assertNotEquals(p0OneTwo, p1TwoOne);
+
+    final String s0 = "xy";
+
+    // p0s0One and p1s0One are different objects but are equal because their
+    // contents are the same objects
+    final IdPair<String, Integer> p0s0One = IdPair.of(s0, 1);
+    final IdPair<String, Integer> p1s0One = IdPair.of(s0, 1);
+    assertNotSame(p0s0One, p1s0One); // different objects, but are equal
+    assertEquals(p0s0One, p0s0One);
+    assertEquals(p0s0One, p1s0One);
+    assertEquals(p1s0One, p0s0One);
+    assertEquals(p0s0One.hashCode(), p1s0One.hashCode());
+
+    // A copy of "s0" that is equal but not the same object
+    final String s1 = s0.toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT);
+    assertEquals(s0, s1);
+    assertNotSame(s0, s1);
+
+    // p0s1One is not equal to p0s0One because s1 is not the same object as s0
+    final IdPair<String, Integer> p0s1One = IdPair.of(s1, 1);
+    assertNotEquals(p0s0One, p0s1One);
+    assertEquals(p0s1One.hashCode(), p0s1One.hashCode());
+
+    final Set<IdPair<?, ?>> set =
+        ImmutableSet.of(p0OneTwo, p1OneTwo, p1TwoOne,
+            p0s0One, p1s0One, p0s1One);
+    assertThat(set.size(), is(4));
+    final String[] expected = {"1=2", "2=1", "xy=1", "xy=1"};
+    assertThat(set.stream().map(IdPair::toString).sorted().toArray(),
+        is(expected));
   }
 
   /**
@@ -1629,6 +1755,10 @@ class UtilTest {
     final Collection<String> cbcaC = new LinkedHashSet<>(cbca);
     assertThat(Util.distinctList(cbcaC), not(sameInstance(cbca)));
     assertThat(Util.distinctList(cbcaC), is(Arrays.asList("c", "b", "a")));
+    final List<String> a2 = ImmutableList.of("a", "a");
+    assertThat(Util.distinctList(a2), is(a));
+    final List<String> a1m = Collections.nCopies(1_000_000, "a");
+    assertThat(Util.distinctList(a1m), is(a));
   }
 
   /** Unit test for {@link Utilities#hashCode(double)}. */
@@ -1821,6 +1951,198 @@ class UtilTest {
     final List<String> arrayList = Arrays.asList("a", null, "c");
     final List<String> list = builder.build();
     assertThat(arrayList.equals(list), is(true));
+  }
+
+  /** Test for {@link org.apache.calcite.util.ImmutableNullableSet}. */
+  @Test void testImmutableNullableSet() {
+    final List<String> arrayList = Arrays.asList("a", null, "c", "a");
+    final Set<String> set = ImmutableNullableSet.copyOf(arrayList);
+    final Set<String> set2 = new LinkedHashSet<>(arrayList);
+    assertThat(set.size(), is(set2.size()));
+    assertThat(set, equalTo(set2));
+    assertThat(set.hashCode(), equalTo(set2.hashCode()));
+    assertThat(set.toString(), equalTo(set2.toString()));
+    StringBuilder z = new StringBuilder();
+    for (String s : set) {
+      z.append(s);
+    }
+    assertThat(z.toString(), equalTo("anullc"));
+
+    // changes to array list do not affect copy
+    arrayList.set(0, "z");
+    assertThat(arrayList.get(0), equalTo("z"));
+    assertThat(set.iterator().next(), equalTo("a"));
+
+    try {
+      boolean b = set.add("z");
+      fail("expected error, got " + b);
+    } catch (UnsupportedOperationException e) {
+      // ok
+    }
+    try {
+      boolean b = set.remove("z");
+      fail("expected error, got " + b);
+    } catch (UnsupportedOperationException e) {
+      // ok
+    }
+
+    // Collections.emptySet() is unchanged
+    assertThat(ImmutableNullableSet.copyOf(Collections.emptySet()),
+        sameInstance(Collections.emptySet()));
+
+    // any other empty set becomes ImmutableSet
+    assertThat(ImmutableNullableSet.copyOf(ImmutableSet.of()),
+        sameInstance(ImmutableSet.of()));
+
+    assertThat(ImmutableNullableSet.copyOf(new HashSet<>()),
+        sameInstance(ImmutableSet.of()));
+
+    // singleton set is unchanged
+    final Set<String> justA = Collections.singleton("a");
+    assertThat(ImmutableNullableSet.copyOf(justA),
+        sameInstance(justA));
+
+    final Set<String> justNull = Collections.singleton(null);
+    assertThat(ImmutableNullableSet.copyOf(justNull),
+        sameInstance(justNull));
+
+    // set with no nulls uses ImmutableSet
+    final List<String> abcList = Arrays.asList("a", "b", "c");
+    final Set<String> abcSet = new LinkedHashSet<>(abcList);
+    assertThat(ImmutableNullableSet.copyOf(abcList),
+        isA((Class) ImmutableSet.class));
+
+    // set with no nulls uses ImmutableSet
+    assertThat(ImmutableNullableSet.copyOf(abcList),
+        isA((Class) ImmutableSet.class));
+    assertThat(ImmutableNullableSet.copyOf(abcList), equalTo(abcSet));
+
+    assertThat(ImmutableNullableSet.copyOf(abcSet),
+        isA((Class) ImmutableSet.class));
+    assertThat(ImmutableNullableSet.copyOf(abcSet), equalTo(abcSet));
+
+    // set with no nulls uses ImmutableSet
+    final List<String> ab0cList = Arrays.asList("a", "b", null, "c");
+    final Set<String> ab0cSet = new LinkedHashSet<>(ab0cList);
+    assertThat(ImmutableNullableSet.copyOf(ab0cList),
+        not(isA((Class) ImmutableSet.class)));
+    assertThat(ImmutableNullableSet.copyOf(ab0cList), equalTo(ab0cSet));
+
+    assertThat(ImmutableNullableSet.copyOf(ab0cSet),
+        not(isA((Class) ImmutableSet.class)));
+    assertThat(ImmutableNullableSet.copyOf(ab0cSet), equalTo(ab0cSet));
+  }
+
+  /** Tests {@link ReflectUtil#mightBeAssignableFrom(Class, Class)}. */
+  @Test void testMightBeAssignableFrom() {
+    final Object myMap = new HashMap<String, Integer>() {
+      @NotNull @Override public Set<Entry<String, Integer>> entrySet() {
+        throw new UnsupportedOperationException();
+      }
+      @Nullable @Override public Integer put(String key, Integer value) {
+        throw new UnsupportedOperationException();
+      }
+      @Override public int size() {
+        throw new UnsupportedOperationException();
+      }
+    };
+    final Class<?> myMapClass = myMap.getClass();
+
+    // Categories:
+    //   String - final class
+    //   int - primitive
+    //   Map - interface
+    //   HashMap - non-final class
+    //   myMapClass - anonymous (therefore final) class that extends HashMap
+    //   StringBuilder - final class
+    //   DayOfWeek - enum
+
+    // What can be assigned to an Object parameter? Anything except a primitive.
+    checkAssignable(Object.class, Object.class, true);
+    checkAssignable(Object.class, String.class, true);
+    checkAssignable(Object.class, DayOfWeek.class, true);
+    checkAssignable(Object.class, int.class, false);
+    checkAssignable(Object.class, Map.class, true);
+    checkAssignable(Object.class, HashMap.class, true);
+    checkAssignable(Object.class, myMapClass, true);
+
+    // What can be assigned to an String parameter? String is a final class, so
+    // only itself, super-classes and super-interfaces.
+    checkAssignable(String.class, Object.class, true);
+    checkAssignable(String.class, String.class, true);
+    checkAssignable(String.class, DayOfWeek.class, false);
+    checkAssignable(String.class, int.class, false);
+    checkAssignable(String.class, Integer.class, false);
+    checkAssignable(String.class, Map.class, false);
+    checkAssignable(String.class, HashMap.class, false);
+    checkAssignable(String.class, myMapClass, false);
+    checkAssignable(String.class, Serializable.class, true);
+    checkAssignable(String.class, Throwable.class, false);
+
+    // What can be assigned to an int parameter? int is primitive, so only int.
+    checkAssignable(int.class, Object.class, false);
+    checkAssignable(int.class, String.class, false);
+    checkAssignable(int.class, DayOfWeek.class, false);
+    checkAssignable(int.class, int.class, true);
+    checkAssignable(int.class, Map.class, false);
+    checkAssignable(int.class, HashMap.class, false);
+    checkAssignable(int.class, myMapClass, false);
+    checkAssignable(int.class, Serializable.class, false);
+
+    // What can be assigned to an Integer parameter? Integer is a final class.
+    checkAssignable(Integer.class, Object.class, true);
+    checkAssignable(Integer.class, String.class, false);
+    checkAssignable(Integer.class, DayOfWeek.class, false);
+    checkAssignable(Integer.class, Integer.class, true);
+    checkAssignable(Integer.class, int.class, false);
+    checkAssignable(Integer.class, Map.class, false);
+    checkAssignable(Integer.class, HashMap.class, false);
+    checkAssignable(Integer.class, myMapClass, false);
+    checkAssignable(Integer.class, Serializable.class, true);
+    checkAssignable(Integer.class, Number.class, true);
+
+    // What can be assigned to an HashMap parameter? HashMap is a non-final
+    // class.
+    checkAssignable(HashMap.class, Object.class, true);
+    checkAssignable(HashMap.class, String.class, false);
+    checkAssignable(HashMap.class, DayOfWeek.class, false);
+    checkAssignable(HashMap.class, int.class, false);
+    checkAssignable(HashMap.class, Map.class, true);
+    checkAssignable(HashMap.class, HashMap.class, true);
+    checkAssignable(HashMap.class, myMapClass, true);
+    checkAssignable(HashMap.class, Serializable.class, true);
+    checkAssignable(HashMap.class, Number.class, true);
+
+    // What can be assigned to a Map parameter? Map is an interface, so
+    // anything except primitives and final classes that do not implement Map.
+    checkAssignable(Map.class, Object.class, true);
+    checkAssignable(Map.class, String.class, false);
+    checkAssignable(Map.class, DayOfWeek.class, false);
+    checkAssignable(Map.class, int.class, false);
+    checkAssignable(Map.class, Map.class, true);
+    checkAssignable(Map.class, HashMap.class, true);
+    checkAssignable(Map.class, myMapClass, true);
+    checkAssignable(Map.class, NavigableMap.class, true);
+    checkAssignable(Map.class, Serializable.class, true);
+    checkAssignable(Map.class, StringBuilder.class, false);
+
+    // What can be assigned to an Enum parameter? An Enum is very similar to a
+    // final class.
+    checkAssignable(DayOfWeek.class, Object.class, true);
+    checkAssignable(DayOfWeek.class, String.class, false);
+    checkAssignable(DayOfWeek.class, DayOfWeek.class, true);
+    checkAssignable(DayOfWeek.class, int.class, false);
+    checkAssignable(DayOfWeek.class, Map.class, false);
+    checkAssignable(DayOfWeek.class, HashMap.class, false);
+    checkAssignable(DayOfWeek.class, myMapClass, false);
+    checkAssignable(DayOfWeek.class, Serializable.class, true);
+    checkAssignable(DayOfWeek.class, Enum.class, true);
+    checkAssignable(DayOfWeek.class, TemporalAccessor.class, true);
+    checkAssignable(DayOfWeek.class, StringBuilder.class, false);
+  }
+
+  private void checkAssignable(Class<?> target, Class<?> source, boolean b) {
+    assertThat(ReflectUtil.mightBeAssignableFrom(target, source), is(b));
   }
 
   @Test void testHuman() {
@@ -2427,6 +2749,18 @@ class UtilTest {
     assertThat(isLinux("x\r\ny").matches("x\ny"), is(false));
   }
 
+  /** Tests {@link Util#andThen(UnaryOperator, UnaryOperator)}. */
+  @Test void testAndThen() {
+    final UnaryOperator<Integer> inc = x -> x + 1;
+    final UnaryOperator<Integer> triple = x -> x * 3;
+    final UnaryOperator<Integer> tripleInc = Util.andThen(triple, inc);
+    final UnaryOperator<Integer> incTriple = Util.andThen(inc, triple);
+    final Function<Integer, Integer> incTripleFn = inc.andThen(triple);
+    assertThat(tripleInc.apply(2), is(7));
+    assertThat(incTriple.apply(2), is(9));
+    assertThat(incTripleFn.apply(2), is(9));
+  }
+
   /** Tests {@link Util#transform(List, java.util.function.Function)}. */
   @Test void testTransform() {
     final List<String> beatles =
@@ -2464,6 +2798,28 @@ class UtilTest {
         isIterable(Collections.singletonList(null)));
     assertThat(Util.filter(nullBeatles, Objects::nonNull),
         isIterable(Arrays.asList("John", "Paul", "Ringo")));
+  }
+
+  /** Tests {@link Util#moveToHead(List, Predicate)}. */
+  @Test void testMoveToHead() {
+    final List<Integer> primes = ImmutableList.of(2, 3, 5, 7);
+    final List<Integer> evenInMiddle = ImmutableList.of(1, 2, 3);
+    final List<Integer> evenAtEnd = ImmutableList.of(1, 3, 8);
+    final List<Integer> empty = ImmutableList.of();
+    final List<Integer> evens = ImmutableList.of(0, 2, 4);
+    final List<Integer> odds = ImmutableList.of(1, 3, 5);
+    final Predicate<Integer> isEven = i -> i % 2 == 0;
+    assertThat(Util.moveToHead(primes, isEven).toString(), is("[2, 3, 5, 7]"));
+    assertThat(Util.moveToHead(primes, isEven), sameInstance(primes));
+    assertThat(Util.moveToHead(evenInMiddle, isEven).toString(),
+        is("[2, 1, 3]"));
+    assertThat(Util.moveToHead(evenAtEnd, isEven).toString(), is("[8, 1, 3]"));
+    assertThat(Util.moveToHead(empty, isEven).toString(), is("[]"));
+    assertThat(Util.moveToHead(empty, isEven), sameInstance(empty));
+    assertThat(Util.moveToHead(evens, isEven).toString(), is("[0, 2, 4]"));
+    assertThat(Util.moveToHead(evens, isEven), sameInstance(evens));
+    assertThat(Util.moveToHead(odds, isEven).toString(), is("[1, 3, 5]"));
+    assertThat(Util.moveToHead(odds, isEven), sameInstance(odds));
   }
 
   /** Tests {@link Util#select(List, List)}. */
@@ -2529,7 +2885,7 @@ class UtilTest {
     c.equiv("fg", "fG");
     assertThat(c.size(), is(6));
     assertThat(c.classCount(), is(3));
-    final SortedMap<String, SortedSet<String>> map = c.map();
+    final NavigableMap<String, SortedSet<String>> map = c.map();
     assertThat(map.toString(),
         is("{ABC=[ABC, Abc, abc], de=[de], fG=[fG, fg]}"));
 

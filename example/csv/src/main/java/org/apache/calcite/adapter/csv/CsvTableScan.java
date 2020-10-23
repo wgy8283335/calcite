@@ -21,6 +21,7 @@ import org.apache.calcite.adapter.enumerable.EnumerableRel;
 import org.apache.calcite.adapter.enumerable.EnumerableRelImplementor;
 import org.apache.calcite.adapter.enumerable.PhysType;
 import org.apache.calcite.adapter.enumerable.PhysTypeImpl;
+import org.apache.calcite.adapter.file.JsonTable;
 import org.apache.calcite.linq4j.tree.Blocks;
 import org.apache.calcite.linq4j.tree.Expressions;
 import org.apache.calcite.linq4j.tree.Primitive;
@@ -44,7 +45,7 @@ import java.util.List;
 /**
  * Relational expression representing a scan of a CSV file.
  *
- * <p>Like any table scan, it serves as a leaf node of a query tree.</p>
+ * <p>Like any table scan, it serves as a leaf node of a query tree.
  */
 public class CsvTableScan extends TableScan implements EnumerableRel {
   final CsvTranslatableTable csvTable;
@@ -80,7 +81,7 @@ public class CsvTableScan extends TableScan implements EnumerableRel {
   }
 
   @Override public void register(RelOptPlanner planner) {
-    planner.addRule(CsvProjectTableScanRule.INSTANCE);
+    planner.addRule(CsvRules.PROJECT_SCAN);
   }
 
   @Override public RelOptCost computeSelfCost(RelOptPlanner planner,
@@ -97,7 +98,7 @@ public class CsvTableScan extends TableScan implements EnumerableRel {
             / ((double) table.getRowType().getFieldCount() + 2D));
   }
 
-  public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
+  @Override public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
     PhysType physType =
         PhysTypeImpl.of(
             implementor.getTypeFactory(),

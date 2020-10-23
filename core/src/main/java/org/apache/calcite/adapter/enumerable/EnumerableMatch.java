@@ -102,7 +102,7 @@ public class EnumerableMatch extends Match implements EnumerableRel {
         subsets, allRows, partitionKeys, orderKeys, interval);
   }
 
-  public EnumerableRel.Result implement(EnumerableRelImplementor implementor,
+  @Override public EnumerableRel.Result implement(EnumerableRelImplementor implementor,
       EnumerableRel.Prefer pref) {
     final BlockBuilder builder = new BlockBuilder();
     final EnumerableRel input = (EnumerableRel) getInput();
@@ -268,6 +268,8 @@ public class EnumerableMatch extends Match implements EnumerableRel {
         ((PassedRowsInputGetter) translator.inputGetter).setIndex(null);
         return matchImplementor.implement(translator, call, row_, rows_,
             symbols_, i_);
+      default:
+        break;
       }
       return translator.translate(operands.get(0));
 
@@ -352,6 +354,7 @@ public class EnumerableMatch extends Match implements EnumerableRel {
       //   }
       final ParameterExpression row0_ =
           Expressions.parameter(Object.class, "row");
+      @SuppressWarnings("unused")
       final ParameterExpression rowsO_ =
           Expressions.parameter(Object.class, "rows");
       BlockBuilder bridgeBody = new BlockBuilder();
@@ -433,6 +436,8 @@ public class EnumerableMatch extends Match implements EnumerableRel {
         operand = (RexLiteral) call.getOperands().get(1);
         final int next = operand.getValueAs(Integer.class);
         this.future = Math.max(this.future, next);
+        break;
+      default:
         break;
       }
       return null;

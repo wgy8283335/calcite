@@ -140,7 +140,7 @@ explain:
       EXPLAIN PLAN
       [ WITH TYPE | WITH IMPLEMENTATION | WITHOUT IMPLEMENTATION ]
       [ EXCLUDING ATTRIBUTES | INCLUDING [ ALL ] ATTRIBUTES ]
-      [ AS JSON | AS XML ]
+      [ AS JSON | AS XML | AS DOT ]
       FOR ( query | insert | update | merge | delete )
 
 describe:
@@ -228,6 +228,7 @@ joinCondition:
 tableReference:
       tablePrimary
       [ FOR SYSTEM_TIME AS OF expression ]
+      [ pivot ]
       [ matchRecognize ]
       [ [ AS ] alias [ '(' columnAlias [, columnAlias ]* ')' ] ]
 
@@ -258,6 +259,27 @@ hintKVOption:
 optionValue:
       stringLiteral
   |   numericLiteral
+
+pivot:
+      PIVOT '('
+      pivotAgg [, pivotAgg ]*
+      FOR pivotList
+      IN '(' pivotExpr [, pivotExpr ]* ')'
+      ')'
+
+pivotAgg:
+      agg '(' [ ALL | DISTINCT ] value [, value ]* ')'
+      [ [ AS ] alias ]
+
+pivotList:
+      column
+   |  '(' column [, column ]* ')'
+
+pivotExpr:
+      { expr
+      | '(' expr [, expr ]* ')'
+      }
+      [ [ AS ] alias ]
 
 values:
       VALUES expression [, expression ]*
@@ -366,6 +388,8 @@ ALWAYS,
 APPLY,
 **ARE**,
 **ARRAY**,
+ARRAY_AGG,
+ARRAY_CONCAT_AGG,
 **ARRAY_MAX_CARDINALITY**,
 **AS**,
 ASC,
@@ -510,6 +534,7 @@ DIAGNOSTICS,
 DISPATCH,
 **DISTINCT**,
 DOMAIN,
+DOT,
 **DOUBLE**,
 DOW,
 DOY,
@@ -753,6 +778,7 @@ PATH,
 **PERCENT_RANK**,
 **PERIOD**,
 **PERMUTE**,
+PIVOT,
 PLACING,
 PLAN,
 PLI,
@@ -920,6 +946,7 @@ STATEMENT,
 **STDDEV_POP**,
 **STDDEV_SAMP**,
 **STREAM**,
+STRING_AGG,
 STRUCTURE,
 STYLE,
 SUBCLASS_ORIGIN,
@@ -1183,7 +1210,7 @@ completeness.
 | value IN (sub-query)                              | Whether *value* is equal to a row returned by *sub-query*
 | value NOT IN (sub-query)                          | Whether *value* is not equal to every row returned by *sub-query*
 | value comparison SOME (sub-query)                 | Whether *value* *comparison* at least one row returned by *sub-query*
-| value comparison ANY (sub-query)                  | Synonym for SOME
+| value comparison ANY (sub-query)                  | Synonym for `SOME`
 | value comparison ALL (sub-query)                  | Whether *value* *comparison* every row returned by *sub-query*
 | EXISTS (sub-query)                                | Whether *sub-query* returns at least one row
 
@@ -1774,11 +1801,11 @@ and `LISTAGG`).
 | MAX( [ ALL &#124; DISTINCT ] value)           | Returns the maximum value of *value* across all input values
 | MIN( [ ALL &#124; DISTINCT ] value)           | Returns the minimum value of *value* across all input values
 | ANY_VALUE( [ ALL &#124; DISTINCT ] value)     | Returns one of the values of *value* across all input values; this is NOT specified in the SQL standard
-| SOME(condition)                               | Returns true if any condition is true.
-| EVERY(condition)                              | Returns true if all conditions are true.
-| BIT_AND( [ ALL &#124; DISTINCT ] value)       | Returns the bitwise AND of all non-null input values, or null if none
-| BIT_OR( [ ALL &#124; DISTINCT ] value)        | Returns the bitwise OR of all non-null input values, or null if none
-| BIT_XOR( [ ALL &#124; DISTINCT ] value)       | Returns the bitwise XOR of all non-null input values, or null if none
+| SOME(condition)                               | Returns TRUE if one or more of the values of *condition* is TRUE
+| EVERY(condition)                              | Returns TRUE if all of the values of *condition* are TRUE
+| BIT_AND( [ ALL &#124; DISTINCT ] value)       | Returns the bitwise AND of all non-null input values, or null if none; integer and binary types are supported
+| BIT_OR( [ ALL &#124; DISTINCT ] value)        | Returns the bitwise OR of all non-null input values, or null if none; integer and binary types are supported
+| BIT_XOR( [ ALL &#124; DISTINCT ] value)       | Returns the bitwise XOR of all non-null input values, or null if none; integer and binary types are supported
 | STDDEV_POP( [ ALL &#124; DISTINCT ] numeric)  | Returns the population standard deviation of *numeric* across all input values
 | STDDEV_SAMP( [ ALL &#124; DISTINCT ] numeric) | Returns the sample standard deviation of *numeric* across all input values
 | STDDEV( [ ALL &#124; DISTINCT ] numeric)      | Synonym for `STDDEV_SAMP`
@@ -1866,7 +1893,7 @@ Not implemented:
 |:-------------------- |:-----------
 | DESCRIPTOR(name [, name ]*) | DESCRIPTOR appears as an argument in a function to indicate a list of names. The interpretation of names is left to the function.
 
-### Table functions.
+### Table functions
 Table functions occur in the `FROM` clause.
 
 #### TUMBLE
@@ -1876,10 +1903,24 @@ is named as "fixed windowing".
 
 | Operator syntax      | Description
 |:-------------------- |:-----------
-| TUMBLE(table, DESCRIPTOR(datetime), interval) | Indicates a tumbling window of *interval* for *datetime*.
+| TUMBLE(data, DESCRIPTOR(timecol), size [, offset ]) | Indicates a tumbling window of *size* interval for *timecol*, optionally aligned at *offset*.
 
 Here is an example:
-`SELECT * FROM TABLE(TUMBLE(TABLE orders, DESCRIPTOR(rowtime), INTERVAL '1' MINUTE))`,
+```SQL
+SELECT * FROM TABLE(
+  TUMBLE(
+    TABLE orders,
+    DESCRIPTOR(rowtime),
+    INTERVAL '1' MINUTE));
+
+-- or with the named params
+-- note: the DATA param must be the first
+SELECT * FROM TABLE(
+  TUMBLE(
+    DATA => TABLE orders,
+    TIMECOL => DESCRIPTOR(rowtime),
+    SIZE => INTERVAL '1' MINUTE));
+```
 will apply tumbling with 1 minute window size on rows from table orders. rowtime is the
 watermarked column of table orders that tells data completeness.
 
@@ -1890,10 +1931,26 @@ on a timestamp column. Windows assigned could have overlapping so hopping someti
 
 | Operator syntax      | Description
 |:-------------------- |:-----------
-| HOP(table, DESCRIPTOR(datetime), slide, size) | Indicates a hopping window for *datetime*, covering rows within the interval of *size*, shifting every *slide*.
+| HOP(data, DESCRIPTOR(timecol), slide, size [, offset ]) | Indicates a hopping window for *timecol*, covering rows within the interval of *size*, shifting every *slide* and optionally aligned at *offset*.
 
 Here is an example:
-`SELECT * FROM TABLE(HOP(TABLE orders, DESCRIPTOR(rowtime), INTERVAL '2' MINUTE, INTERVAL '5' MINUTE))`,
+```SQL
+SELECT * FROM TABLE(
+  HOP(
+    TABLE orders,
+    DESCRIPTOR(rowtime),
+    INTERVAL '2' MINUTE,
+    INTERVAL '5' MINUTE));
+
+-- or with the named params
+-- note: the DATA param must be the first
+SELECT * FROM TABLE(
+  HOP(
+    DATA => TABLE orders,
+    TIMECOL => DESCRIPTOR(rowtime),
+    SLIDE => INTERVAL '2' MINUTE,
+    SIZE => INTERVAL '5' MINUTE));
+```
 will apply hopping with 5-minute interval size on rows from table orders and shifting every 2 minutes. rowtime is the
 watermarked column of table orders that tells data completeness.
 
@@ -1904,12 +1961,33 @@ of rows are less than *interval*. Session window is applied per *key*.
 
 | Operator syntax      | Description
 |:-------------------- |:-----------
-| session(table, DESCRIPTOR(datetime), DESCRIPTOR(key), interval) | Indicates a session window of *interval* for *datetime*. Session window is applied per *key*.
+| session(data, DESCRIPTOR(timecol), DESCRIPTOR(key), size) | Indicates a session window of *size* interval for *timecol*. Session window is applied per *key*.
 
 Here is an example:
-`SELECT * FROM TABLE(SESSION(TABLE orders, DESCRIPTOR(rowtime), DESCRIPTOR(product), INTERVAL '20' MINUTE))`,
+```SQL
+SELECT * FROM TABLE(
+  SESSION(
+    TABLE orders,
+    DESCRIPTOR(rowtime),
+    DESCRIPTOR(product),
+    INTERVAL '20' MINUTE));
+
+-- or with the named params
+-- note: the DATA param must be the first
+SELECT * FROM TABLE(
+  SESSION(
+    DATA => TABLE orders,
+    TIMECOL => DESCRIPTOR(rowtime),
+    KEY => DESCRIPTOR(product),
+    SIZE => INTERVAL '20' MINUTE));
+```
 will apply session with 20-minute inactive gap on rows from table orders. rowtime is the
 watermarked column of table orders that tells data completeness. Session is applied per product.
+
+**Note**: The `Tumble`, `Hop` and `Session` window table functions assign
+each row in the original table to a window. The output table has all
+the same columns as the original table plus two additional columns `window_start`
+and `window_end`, which repesent the start and end of the window interval, respectively.
 
 ### Grouped window functions
 **warning**: grouped window functions are deprecated.
@@ -1962,13 +2040,15 @@ In the "C" (for "compatibility") column, "o" indicates that the function
 implements the OpenGIS Simple Features Implementation Specification for SQL,
 [version 1.2.1](https://www.opengeospatial.org/standards/sfs);
 "p" indicates that the function is a
-[PostGIS](https://www.postgis.net/docs/reference.html) extension to OpenGIS.
+[PostGIS](https://www.postgis.net/docs/reference.html) extension to OpenGIS;
+"h" indicates that the function is an
+[H2GIS](http://www.h2gis.org/docs/dev/functions/) extension.
 
 #### Geometry conversion functions (2D)
 
 | C | Operator syntax      | Description
 |:- |:-------------------- |:-----------
-| p | ST_AsText(geom) | Alias for `ST_AsWKT`
+| p | ST_AsText(geom) | Synonym for `ST_AsWKT`
 | o | ST_AsWKT(geom) | Converts *geom* → WKT
 | o | ST_GeomFromText(wkt [, srid ]) | Returns a specified GEOMETRY value from WKT representation
 | o | ST_LineFromText(wkt [, srid ]) | Converts WKT → LINESTRING
@@ -2004,8 +2084,11 @@ Not implemented:
 
 | C | Operator syntax      | Description
 |:- |:-------------------- |:-----------
+| p | ST_MakeEnvelope(xMin, yMin, xMax, yMax  [, srid ]) | Creates a rectangular POLYGON
+| h | ST_MakeGrid(geom, deltaX, deltaY) | Calculates a regular grid of POLYGONs based on *geom*
+| h | ST_MakeGridPoints(geom, deltaX, deltaY) | Calculates a regular grid of points based on *geom*
 | o | ST_MakeLine(point1 [, point ]*) | Creates a line-string from the given POINTs (or MULTIPOINTs)
-| p | ST_MakePoint(x, y [, z ]) | Alias for `ST_Point`
+| p | ST_MakePoint(x, y [, z ]) | Synonym for `ST_Point`
 | o | ST_Point(x, y [, z ]) | Constructs a point from two or three coordinates
 
 Not implemented:
@@ -2014,9 +2097,6 @@ Not implemented:
 * ST_Expand(geom, distance) Expands *geom*'s envelope
 * ST_Expand(geom, deltaX, deltaY) Expands *geom*'s envelope
 * ST_MakeEllipse(point, width, height) Constructs an ellipse
-* ST_MakeEnvelope(xMin, yMin, xMax, yMax  [, srid ]) Creates a rectangular POLYGON
-* ST_MakeGrid(geom, deltaX, deltaY) Calculates a regular grid of POLYGONs based on *geom*
-* ST_MakeGridPoints(geom, deltaX, deltaY) Calculates a regular grid of points based on *geom*
 * ST_MakePolygon(lineString [, hole ]*) Creates a POLYGON from *lineString* with the given holes (which are required to be closed LINESTRINGs)
 * ST_MinimumDiameter(geom) Returns the minimum diameter of *geom*
 * ST_MinimumRectangle(geom) Returns the minimum rectangle enclosing *geom*
@@ -2066,7 +2146,7 @@ Not implemented:
 * ST_IsValidReason(geom [, selfTouchValid ]) Returns text stating whether *geom* is valid, and if not valid, a reason why
 * ST_NPoints(geom) Returns the number of points in *geom*
 * ST_NumGeometries(geom) Returns the number of geometries in *geom* (1 if it is not a GEOMETRYCOLLECTION)
-* ST_NumInteriorRing(geom) Alias for `ST_NumInteriorRings`
+* ST_NumInteriorRing(geom) Synonym for `ST_NumInteriorRings`
 * ST_NumInteriorRings(geom) Returns the number of interior rings of *geom*
 * ST_NumPoints(lineString) Returns the number of points in *lineString*
 * ST_PointN(geom, n) Returns the *n*th point of a *lineString*
@@ -2249,7 +2329,7 @@ Not implemented:
 Not implemented:
 
 * ST_Accum(geom) Accumulates *geom* into a GEOMETRYCOLLECTION (or MULTIPOINT, MULTILINESTRING or MULTIPOLYGON if possible)
-* ST_Collect(geom) Alias for `ST_Accum`
+* ST_Collect(geom) Synonym for `ST_Accum`
 * ST_Union(geom) Computes the union of geometries
 
 ### JSON Functions
@@ -2339,10 +2419,13 @@ To enable an operator table, set the
 [fun]({{ site.baseurl }}/docs/adapter.html#jdbc-connect-string-parameters)
 connect string parameter.
 
-The 'C' (compatibility) column contains value
-'m' for MySQL ('fun=mysql' in the connect string),
-'o' for Oracle ('fun=oracle' in the connect string),
-'p' for PostgreSQL ('fun=postgresql' in the connect string).
+The 'C' (compatibility) column contains value:
+* 'b' for Google BigQuery ('fun=bigquery' in the connect string),
+* 'h' for Apache Hive ('fun=hive' in the connect string),
+* 'm' for MySQL ('fun=mysql' in the connect string),
+* 'o' for Oracle ('fun=oracle' in the connect string),
+* 'p' for PostgreSQL ('fun=postgresql' in the connect string),
+* 's' for Apache Spark ('fun=spark' in the connect string).
 
 One operator name may correspond to multiple SQL dialects, but with different
 semantics.
@@ -2356,13 +2439,17 @@ semantics.
 | m p | CONCAT(string [, string ]*)                  | Concatenates two or more strings
 | m | COMPRESS(string)                               | Compresses a string using zlib compression and returns the result as a binary string.
 | p | CONVERT_TIMEZONE(tz1, tz2, datetime)           | Converts the timezone of *datetime* from *tz1* to *tz2*
+| b | CURRENT_DATETIME([timezone])                   | Returns the current time as a TIMESTAMP from *timezone*
 | m | DAYNAME(datetime)                              | Returns the name, in the connection's locale, of the weekday in *datetime*; for example, it returns '星期日' for both DATE '2020-02-10' and TIMESTAMP '2020-02-10 10:10:10'
+| b | DATE(string)                                   | Equivalent to `CAST(string AS DATE)`
+| b | DATE_FROM_UNIX_DATE(integer)                   | Returns the DATE that is *integer* days after 1970-01-01
 | o | DECODE(value, value1, result1 [, valueN, resultN ]* [, default ]) | Compares *value* to each *valueN* value one by one; if *value* is equal to a *valueN*, returns the corresponding *resultN*, else returns *default*, or NULL if *default* is not specified
 | p | DIFFERENCE(string, string)                     | Returns a measure of the similarity of two strings, namely the number of character positions that their `SOUNDEX` values have in common: 4 if the `SOUNDEX` values are same and 0 if the `SOUNDEX` values are totally different
 | o | EXTRACT(xml, xpath, [, namespaces ])           | Returns the xml fragment of the element or elements matched by the XPath expression. The optional namespace value that specifies a default mapping or namespace mapping for prefixes, which is used when evaluating the XPath expression
 | o | EXISTSNODE(xml, xpath, [, namespaces ])        | Determines whether traversal of a XML document using a specified xpath results in any nodes. Returns 0 if no nodes remain after applying the XPath traversal on the document fragment of the element or elements matched by the XPath expression. Returns 1 if any nodes remain. The optional namespace value that specifies a default mapping or namespace mapping for prefixes, which is used when evaluating the XPath expression.
 | m | EXTRACTVALUE(xml, xpathExpr))                  | Returns the text of the first text node which is a child of the element or elements matched by the XPath expression.
 | o | GREATEST(expr [, expr ]*)                      | Returns the greatest of the expressions
+| b h s | IF(condition, value1, value2)              | Returns *value1* if *condition* is TRUE, *value2* otherwise
 | m | JSON_TYPE(jsonValue)                           | Returns a string value indicating the type of a *jsonValue*
 | m | JSON_DEPTH(jsonValue)                          | Returns an integer value indicating the depth of a *jsonValue*
 | m | JSON_PRETTY(jsonValue)                         | Returns a pretty-printing of *jsonValue*
@@ -2388,12 +2475,19 @@ semantics.
 | m o p | SOUNDEX(string)                            | Returns the phonetic representation of *string*; throws if *string* is encoded with multi-byte encoding such as UTF-8
 | m | SPACE(integer)                                 | Returns a string of *integer* spaces; returns an empty string if *integer* is less than 1
 | o | SUBSTR(string, position [, substringLength ]) | Returns a portion of *string*, beginning at character *position*, *substringLength* characters long. SUBSTR calculates lengths using characters as defined by the input character set
-| m | STRCMP(string, string)                         | Returns 0 if both of the strings are same and returns -1 when the first argument is smaller than the second and 1 when the second one is smaller the first one.
+| m | STRCMP(string, string)                         | Returns 0 if both of the strings are same and returns -1 when the first argument is smaller than the second and 1 when the second one is smaller than the first one
 | o | TANH(numeric)                                  | Returns the hyperbolic tangent of *numeric*
+| b | TIMESTAMP_MICROS(integer)                      | Returns the TIMESTAMP that is *integer* microseconds after 1970-01-01 00:00:00
+| b | TIMESTAMP_MILLIS(integer)                      | Returns the TIMESTAMP that is *integer* milliseconds after 1970-01-01 00:00:00
+| b | TIMESTAMP_SECONDS(integer)                     | Returns the TIMESTAMP that is *integer* seconds after 1970-01-01 00:00:00
 | o p | TO_DATE(string, format)                      | Converts *string* to a date using the format *format*
 | o p | TO_TIMESTAMP(string, format)                 | Converts *string* to a timestamp using the format *format*
 | o p | TRANSLATE(expr, fromString, toString)        | Returns *expr* with all occurrences of each character in *fromString* replaced by its corresponding character in *toString*. Characters in *expr* that are not in *fromString* are not replaced
-| o | XMLTRANSFORM(xml, xslt)                        | Returns a string after applying xslt to supplied xml.
+| b | UNIX_MICROS(timestamp)                         | Returns the number of microseconds since 1970-01-01 00:00:00
+| b | UNIX_MILLIS(timestamp)                         | Returns the number of milliseconds since 1970-01-01 00:00:00
+| b | UNIX_SECONDS(timestamp)                        | Returns the number of seconds since 1970-01-01 00:00:00
+| b | UNIX_DATE(date)                                | Returns the number of days since 1970-01-01
+| o | XMLTRANSFORM(xml, xslt)                        | Applies XSLT transform *xslt* to XML string *xml* and returns the result
 
 Note:
 
@@ -2417,6 +2511,18 @@ Note:
 * `JSON_LENGTH` defines a JSON value's length as follows:
   * A scalar value has length 1;
   * The length of array or object is the number of elements is contains.
+
+Dialect-specific aggregate functions.
+
+| C | Operator syntax                                | Description
+|:- |:-----------------------------------------------|:-----------
+| b p | ARRAY_AGG( [ ALL &#124; DISTINCT ] value [ RESPECT NULLS &#124; IGNORE NULLS ] [ ORDER BY orderItem [, orderItem ]* ] ) | Gathers values into arrays
+| b p | ARRAY_CONCAT_AGG( [ ALL &#124; DISTINCT ] value [ ORDER BY orderItem [, orderItem ]* ] ) | Concatenates arrays into arrays
+| p | BOOL_AND(condition)                            | Synonym for `EVERY`
+| p | BOOL_OR(condition)                             | Synonym for `SOME`
+| b | LOGICAL_AND(condition)                         | Synonym for `EVERY`
+| b | LOGICAL_OR(condition)                          | Synonym for `SOME`
+| b p | STRING_AGG( [ ALL &#124; DISTINCT ] value [, separator] [ ORDER BY orderItem [, orderItem ]* ] ) | Synonym for `LISTAGG`
 
 Usage Examples:
 

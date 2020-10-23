@@ -70,7 +70,7 @@ public class SqlDataTypeSpec extends SqlNode {
    * <p>Nullable is nullable! Null means "not specified". E.g.
    * {@code CAST(x AS INTEGER)} preserves the same nullability as {@code x}.
    */
-  private Boolean nullable;
+  private final Boolean nullable;
 
   //~ Constructors -----------------------------------------------------------
 
@@ -122,11 +122,11 @@ public class SqlDataTypeSpec extends SqlNode {
 
   //~ Methods ----------------------------------------------------------------
 
-  public SqlNode clone(SqlParserPos pos) {
+  @Override public SqlNode clone(SqlParserPos pos) {
     return new SqlDataTypeSpec(typeNameSpec, timeZone, pos);
   }
 
-  public SqlMonotonicity getMonotonicity(SqlValidatorScope scope) {
+  @Override public SqlMonotonicity getMonotonicity(SqlValidatorScope scope) {
     return SqlMonotonicity.CONSTANT;
   }
 
@@ -156,10 +156,19 @@ public class SqlDataTypeSpec extends SqlNode {
   /** Returns a copy of this data type specification with a given
    * nullability. */
   public SqlDataTypeSpec withNullable(Boolean nullable) {
-    if (Objects.equals(nullable, this.nullable)) {
+    return withNullable(nullable, SqlParserPos.ZERO);
+  }
+
+  /** Returns a copy of this data type specification with a given
+   * nullability, extending the parser position. */
+  public SqlDataTypeSpec withNullable(Boolean nullable, SqlParserPos pos) {
+    final SqlParserPos newPos = pos == SqlParserPos.ZERO ? this.pos
+        : this.pos.plus(pos);
+    if (Objects.equals(nullable, this.nullable)
+        && newPos.equals(this.pos)) {
       return this;
     }
-    return new SqlDataTypeSpec(typeNameSpec, timeZone, nullable, getParserPosition());
+    return new SqlDataTypeSpec(typeNameSpec, timeZone, nullable, newPos);
   }
 
   /**
@@ -174,19 +183,19 @@ public class SqlDataTypeSpec extends SqlNode {
     return new SqlDataTypeSpec(elementTypeName, timeZone, getParserPosition());
   }
 
-  public void unparse(SqlWriter writer, int leftPrec, int rightPrec) {
+  @Override public void unparse(SqlWriter writer, int leftPrec, int rightPrec) {
     typeNameSpec.unparse(writer, leftPrec, rightPrec);
   }
 
-  public void validate(SqlValidator validator, SqlValidatorScope scope) {
+  @Override public void validate(SqlValidator validator, SqlValidatorScope scope) {
     validator.validateDataType(this);
   }
 
-  public <R> R accept(SqlVisitor<R> visitor) {
+  @Override public <R> R accept(SqlVisitor<R> visitor) {
     return visitor.visit(this);
   }
 
-  public boolean equalsDeep(SqlNode node, Litmus litmus) {
+  @Override public boolean equalsDeep(SqlNode node, Litmus litmus) {
     if (!(node instanceof SqlDataTypeSpec)) {
       return litmus.fail("{} != {}", this, node);
     }

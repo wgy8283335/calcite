@@ -19,9 +19,6 @@ package org.apache.calcite.rel.rel2sql;
 import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.linq4j.tree.Expression;
-import org.apache.calcite.rel.RelCollation;
-import org.apache.calcite.rel.RelDistribution;
-import org.apache.calcite.rel.RelReferentialConstraint;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelProtoDataType;
@@ -36,7 +33,6 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.dialect.CalciteSqlDialect;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.calcite.util.ImmutableBitSet;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -44,7 +40,6 @@ import com.google.common.collect.ImmutableSet;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -101,16 +96,22 @@ class RelToSqlConverterStructsTest {
 
   private static final Table TABLE = new Table() {
     /**
-     * Table schema is as following:
+     * {@inheritDoc}
+     *
+     * <p>Table schema is as follows:
+     *
+     * <blockquote>
+     * <pre>
      *  myTable(
      *          a: BIGINT,
-     *          n1: STRUCT<
-     *                n11: STRUCT<b: BIGINT>,
-     *                n12: STRUCT<c: BIGINT>
-     *              >,
-     *          n2: STRUCT<d: BIGINT>,
-     *          e: BIGINT
-     *  )
+     *          n1: STRUCT&lt;
+     *                n11: STRUCT&lt;b: BIGINT&gt;,
+     *                n12: STRUCT&lt;c: BIGINT&gt;
+     *              &gt;,
+     *          n2: STRUCT&lt;d: BIGINT&gt;,
+     *          e: BIGINT)
+     * </pre>
+     * </blockquote>
      */
     @Override public RelDataType getRowType(RelDataTypeFactory tf) {
       RelDataType bigint = tf.createSqlType(SqlTypeName.BIGINT);
@@ -153,26 +154,6 @@ class RelToSqlConverterStructsTest {
   private static final Statistic STATS = new Statistic() {
     @Override public Double getRowCount() {
       return 0D;
-    }
-
-    @Override public boolean isKey(ImmutableBitSet columns) {
-      return false;
-    }
-
-    @Override public List<ImmutableBitSet> getKeys() {
-      return ImmutableList.of();
-    }
-
-    @Override public List<RelReferentialConstraint> getReferentialConstraints() {
-      return ImmutableList.of();
-    }
-
-    @Override public List<RelCollation> getCollations() {
-      return ImmutableList.of();
-    }
-
-    @Override public RelDistribution getDistribution() {
-      return null;
     }
   };
 

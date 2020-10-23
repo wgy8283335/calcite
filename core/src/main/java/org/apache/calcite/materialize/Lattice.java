@@ -62,7 +62,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableListMultimap;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.LinkedHashMultimap;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Ordering;
 
@@ -74,9 +73,9 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
-import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -391,12 +390,12 @@ public class Lattice {
   }
 
   public List<Measure> toMeasures(List<AggregateCall> aggCallList) {
-    return Lists.transform(aggCallList, this::toMeasure);
+    return Util.transform(aggCallList, this::toMeasure);
   }
 
   private Measure toMeasure(AggregateCall aggCall) {
     return new Measure(aggCall.getAggregation(), aggCall.isDistinct(),
-        aggCall.name, Lists.transform(aggCall.getArgList(), columns::get));
+        aggCall.name, Util.transform(aggCall.getArgList(), columns::get));
   }
 
   public Iterable<? extends Tile> computeTiles() {
@@ -451,7 +450,7 @@ public class Lattice {
   }
 
   public List<String> uniqueColumnNames() {
-    return Lists.transform(columns, column -> column.alias);
+    return Util.transform(columns, column -> column.alias);
   }
 
   Pair<Path, Integer> columnToPathOffset(BaseColumn c) {
@@ -572,7 +571,7 @@ public class Lattice {
       this.digest = b.toString();
     }
 
-    public int compareTo(@Nonnull Measure measure) {
+    @Override public int compareTo(@Nonnull Measure measure) {
       int c = compare(args, measure.args);
       if (c == 0) {
         c = agg.getName().compareTo(measure.agg.getName());
@@ -610,7 +609,7 @@ public class Lattice {
 
     /** Returns a list of argument ordinals. */
     public List<Integer> argOrdinals() {
-      return Lists.transform(args, column -> column.ordinal);
+      return Util.transform(args, column -> column.ordinal);
     }
 
     private static int compare(List<Column> list0, List<Column> list1) {
@@ -656,7 +655,7 @@ public class Lattice {
       return builder.build();
     }
 
-    public int compareTo(Column column) {
+    @Override public int compareTo(Column column) {
       return Utilities.compare(ordinal, column.ordinal);
     }
 
@@ -701,11 +700,11 @@ public class Lattice {
       return ImmutableList.of(table, column);
     }
 
-    public void toSql(SqlWriter writer) {
+    @Override public void toSql(SqlWriter writer) {
       writer.dialect.quoteIdentifier(writer.buf, identifiers());
     }
 
-    public String defaultAlias() {
+    @Override public String defaultAlias() {
       return column;
     }
   }
@@ -726,11 +725,11 @@ public class Lattice {
       return Arrays.toString(new Object[] {e, alias});
     }
 
-    public void toSql(SqlWriter writer) {
+    @Override public void toSql(SqlWriter writer) {
       writer.write(e);
     }
 
-    public String defaultAlias() {
+    @Override public String defaultAlias() {
       // there is no default alias for an expression
       return null;
     }
@@ -769,7 +768,7 @@ public class Lattice {
     private final LatticeRootNode rootNode;
     private final ImmutableList<BaseColumn> baseColumns;
     private final ImmutableListMultimap<String, Column> columnsByAlias;
-    private final SortedSet<Measure> defaultMeasureSet =
+    private final NavigableSet<Measure> defaultMeasureSet =
         new TreeSet<>();
     private final ImmutableList.Builder<Tile> tileListBuilder =
         ImmutableList.builder();
@@ -992,6 +991,8 @@ public class Lattice {
           if (table instanceof String && column instanceof String) {
             return resolveQualifiedColumn((String) table, (String) column);
           }
+          break;
+        default:
           break;
         }
       }

@@ -60,8 +60,6 @@ import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.MappingType;
 import org.apache.calcite.util.mapping.Mappings;
 
-import com.google.common.collect.Lists;
-
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -155,11 +153,11 @@ public abstract class MutableRels {
         RelOptUtil.permute(child.cluster.getTypeFactory(), rowType, mapping),
         child,
         new AbstractList<RexNode>() {
-          public int size() {
+          @Override public int size() {
             return posList.size();
           }
 
-          public RexNode get(int index) {
+          @Override public RexNode get(int index) {
             final int pos = posList.get(index);
             return RexInputRef.of(pos, rowType);
           }
@@ -319,7 +317,7 @@ public abstract class MutableRels {
 
   private static List<RelNode> fromMutables(List<MutableRel> nodes,
       final RelBuilder relBuilder) {
-    return Lists.transform(nodes,
+    return Util.transform(nodes,
         mutableRel -> fromMutable(mutableRel, relBuilder));
   }
 

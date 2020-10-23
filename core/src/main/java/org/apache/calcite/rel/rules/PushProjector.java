@@ -76,22 +76,22 @@ public class PushProjector {
   private final RelBuilder relBuilder;
 
   /**
-   * Original projection expressions
+   * Original projection expressions.
    */
   final List<RexNode> origProjExprs;
 
   /**
-   * Fields from the RelNode that the projection is being pushed past
+   * Fields from the RelNode that the projection is being pushed past.
    */
   final List<RelDataTypeField> childFields;
 
   /**
-   * Number of fields in the RelNode that the projection is being pushed past
+   * Number of fields in the RelNode that the projection is being pushed past.
    */
   final int nChildFields;
 
   /**
-   * Bitmap containing the references in the original projection
+   * Bitmap containing the references in the original projection.
    */
   final BitSet projRefs;
 
@@ -571,7 +571,7 @@ public class PushProjector {
 
   /**
    * Determines how much each input reference needs to be adjusted as a result
-   * of projection
+   * of projection.
    *
    * @return array indicating how much each input needs to be adjusted by
    */
@@ -661,7 +661,7 @@ public class PushProjector {
    * Visitor which builds a bitmap of the inputs used by an expressions, as
    * well as locating expressions corresponding to special operators.
    */
-  private class InputSpecialOpFinder extends RexVisitorImpl<Void> {
+  private static class InputSpecialOpFinder extends RexVisitorImpl<Void> {
     private final BitSet rexRefs;
     private final ImmutableBitSet leftFields;
     private final ImmutableBitSet rightFields;
@@ -691,7 +691,7 @@ public class PushProjector {
       this.strong = Strong.of(strongFields);
     }
 
-    public Void visitCall(RexCall call) {
+    @Override public Void visitCall(RexCall call) {
       if (preserve(call)) {
         return null;
       }
@@ -737,7 +737,7 @@ public class PushProjector {
       return false;
     }
 
-    public Void visitInputRef(RexInputRef inputRef) {
+    @Override public Void visitInputRef(RexInputRef inputRef) {
       rexRefs.set(inputRef.getIndex());
       return null;
     }
@@ -748,7 +748,7 @@ public class PushProjector {
    * Walks an expression tree, replacing input refs with new values to reflect
    * projection and converting special expressions to field references.
    */
-  private class RefAndExprConverter extends RelOptUtil.RexInputConverter {
+  private static class RefAndExprConverter extends RelOptUtil.RexInputConverter {
     private final List<RexNode> preserveLeft;
     private final int firstLeftRef;
     private final List<RexNode> preserveRight;
@@ -770,7 +770,7 @@ public class PushProjector {
       this.firstRightRef = firstRightRef;
     }
 
-    public RexNode visitCall(RexCall call) {
+    @Override public RexNode visitCall(RexCall call) {
       // if the expression corresponds to one that needs to be preserved,
       // convert it to a field reference; otherwise, convert the entire
       // expression
@@ -837,7 +837,7 @@ public class PushProjector {
      * @param expr Expression
      * @return result of evaluating the condition
      */
-    boolean test(RexNode expr);
+    @Override boolean test(RexNode expr);
 
     /**
      * Constant condition that replies {@code false} for all expressions.
@@ -854,7 +854,7 @@ public class PushProjector {
    * An expression condition that evaluates to true if the expression is
    * a call to one of a set of operators.
    */
-  class OperatorExprCondition implements ExprCondition {
+  static class OperatorExprCondition implements ExprCondition {
     private final Set<SqlOperator> operatorSet;
 
     /**
@@ -866,7 +866,7 @@ public class PushProjector {
       this.operatorSet = ImmutableSet.copyOf(operatorSet);
     }
 
-    public boolean test(RexNode expr) {
+    @Override public boolean test(RexNode expr) {
       return expr instanceof RexCall
           && operatorSet.contains(((RexCall) expr).getOperator());
     }

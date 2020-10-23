@@ -34,33 +34,28 @@ import java.util.Map;
 public class SqlSimpleParser {
   //~ Enums ------------------------------------------------------------------
 
+  /** Token. */
   enum TokenType {
     // keywords
     SELECT, FROM, JOIN, ON, USING, WHERE, GROUP, HAVING, ORDER, BY,
 
     UNION, INTERSECT, EXCEPT, MINUS,
 
-    /**
-     * left parenthesis
-     */
+    /** Left parenthesis. */
     LPAREN {
-      public String sql() {
+      @Override public String sql() {
         return "(";
       }
     },
 
-    /**
-     * right parenthesis
-     */
+    /** Right parenthesis. */
     RPAREN {
-      public String sql() {
+      @Override public String sql() {
         return ")";
       }
     },
 
-    /**
-     * identifier, or indeed any miscellaneous sequence of characters
-     */
+    /** Identifier, or indeed any miscellaneous sequence of characters. */
     ID,
 
     /**
@@ -73,7 +68,7 @@ public class SqlSimpleParser {
      */
     SQID, COMMENT,
     COMMA {
-      public String sql() {
+      @Override public String sql() {
         return ",";
       }
     },
@@ -96,10 +91,10 @@ public class SqlSimpleParser {
   //~ Constructors -----------------------------------------------------------
 
   /**
-   * Creates a SqlSimpleParser
+   * Creates a SqlSimpleParser.
    *
    * @param hintToken Hint token
-   * @deprecated
+   * @deprecated Use {@link #SqlSimpleParser(String, SqlParser.Config)}
    */
   @Deprecated // to be removed before 2.0
   public SqlSimpleParser(String hintToken) {
@@ -107,7 +102,7 @@ public class SqlSimpleParser {
   }
 
   /**
-   * Creates a SqlSimpleParser
+   * Creates a SqlSimpleParser.
    *
    * @param hintToken Hint token
    * @param parserConfig parser configuration
@@ -142,8 +137,8 @@ public class SqlSimpleParser {
   }
 
   /**
-   * Turns a partially completed or syntactically incorrect sql statement into
-   * a simplified, valid one that can be validated
+   * Turns a partially completed or syntactically incorrect SQL statement into a
+   * simplified, valid one that can be validated.
    *
    * @param sql A partial or syntactically incorrect sql statement
    * @return a completed, valid (and possibly simplified) SQL statement
@@ -260,6 +255,7 @@ public class SqlSimpleParser {
 
   //~ Inner Classes ----------------------------------------------------------
 
+  /** Tokenizer. */
   public static class Tokenizer {
     private static final Map<String, TokenType> TOKEN_TYPES = new HashMap<>();
 
@@ -444,6 +440,7 @@ public class SqlSimpleParser {
     }
   }
 
+  /** Token. */
   public static class Token {
     private final TokenType type;
     private final String s;
@@ -457,7 +454,7 @@ public class SqlSimpleParser {
       this.s = s;
     }
 
-    public String toString() {
+    @Override public String toString() {
       return (s == null) ? type.toString() : (type + "(" + s + ")");
     }
 
@@ -470,6 +467,7 @@ public class SqlSimpleParser {
     }
   }
 
+  /** Token representing an identifier. */
   public static class IdToken extends Token {
     public IdToken(TokenType type, String s) {
       super(type, s);
@@ -477,6 +475,7 @@ public class SqlSimpleParser {
     }
   }
 
+  /** Token representing a query. */
   static class Query extends Token {
     private final List<Token> tokenList;
 
@@ -485,7 +484,7 @@ public class SqlSimpleParser {
       this.tokenList = new ArrayList<>(tokenList);
     }
 
-    public void unparse(StringBuilder buf) {
+    @Override public void unparse(StringBuilder buf) {
       int k = -1;
       for (Token token : tokenList) {
         if (++k > 0) {
@@ -550,6 +549,8 @@ public class SqlSimpleParser {
               foundInSubQuery = (Query) token;
             }
             break;
+          default:
+            break;
           }
         }
       } else {
@@ -610,6 +611,8 @@ public class SqlSimpleParser {
           purgeWhere();
           purgeGroupByHaving();
           break;
+        default:
+          break;
         }
       }
 
@@ -622,6 +625,8 @@ public class SqlSimpleParser {
               (query == foundInSubQuery) ? hintToken : null);
           break;
         }
+        default:
+          break;
         }
       }
       return this;
@@ -655,6 +660,9 @@ public class SqlSimpleParser {
           if (hintToken.equals(token.s)) {
             found = true;
           }
+          break;
+        default:
+          break;
         }
       }
       if (found) {
@@ -680,6 +688,7 @@ public class SqlSimpleParser {
       sublist.add(new Token(TokenType.ID, "*"));
     }
 
+    @SuppressWarnings("unused")
     private void purgeSelectExprsKeepAliases() {
       List<Token> sublist = findClause(TokenType.SELECT);
       List<Token> newSelectClause = new ArrayList<>();
@@ -738,6 +747,9 @@ public class SqlSimpleParser {
           if (hintToken.equals(token.s)) {
             found = true;
           }
+          break;
+        default:
+          break;
         }
       }
 
@@ -823,6 +835,8 @@ public class SqlSimpleParser {
           if (((Query) token).contains(hintToken)) {
             return true;
           }
+          break;
+        default:
           break;
         }
       }

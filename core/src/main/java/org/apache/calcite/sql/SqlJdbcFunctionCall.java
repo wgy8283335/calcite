@@ -435,7 +435,7 @@ public class SqlJdbcFunctionCall extends SqlFunction {
     return sb.toString();
   }
 
-  public SqlCall createCall(
+  @Override public SqlCall createCall(
       SqlLiteral functionQualifier,
       SqlParserPos pos,
       SqlNode... operands) {
@@ -460,11 +460,11 @@ public class SqlJdbcFunctionCall extends SqlFunction {
     return lookupCall;
   }
 
-  public String getAllowedSignatures(String name) {
+  @Override public String getAllowedSignatures(String name) {
     return lookupMakeCallObj.getOperator().getAllowedSignatures(name);
   }
 
-  public RelDataType deriveType(
+  @Override public RelDataType deriveType(
       SqlValidator validator,
       SqlValidatorScope scope,
       SqlCall call) {
@@ -480,7 +480,7 @@ public class SqlJdbcFunctionCall extends SqlFunction {
     return validateOperands(validator, scope, call);
   }
 
-  public RelDataType inferReturnType(
+  @Override public RelDataType inferReturnType(
       SqlOperatorBinding opBinding) {
     // only expected to come here if validator called this method
     SqlCallBinding callBinding = (SqlCallBinding) opBinding;
@@ -511,7 +511,7 @@ public class SqlJdbcFunctionCall extends SqlFunction {
         callBinding.getScope(), newCall);
   }
 
-  public void unparse(
+  @Override public void unparse(
       SqlWriter writer,
       SqlCall call,
       int leftPrec,
@@ -528,28 +528,28 @@ public class SqlJdbcFunctionCall extends SqlFunction {
   }
 
   /**
-   * @see java.sql.DatabaseMetaData#getNumericFunctions
+   * As {@link java.sql.DatabaseMetaData#getNumericFunctions}.
    */
   public static String getNumericFunctions() {
     return NUMERIC_FUNCTIONS;
   }
 
   /**
-   * @see java.sql.DatabaseMetaData#getStringFunctions
+   * As {@link java.sql.DatabaseMetaData#getStringFunctions}.
    */
   public static String getStringFunctions() {
     return STRING_FUNCTIONS;
   }
 
   /**
-   * @see java.sql.DatabaseMetaData#getTimeDateFunctions
+   * As {@link java.sql.DatabaseMetaData#getTimeDateFunctions}.
    */
   public static String getTimeDateFunctions() {
     return TIME_DATE_FUNCTIONS;
   }
 
   /**
-   * @see java.sql.DatabaseMetaData#getSystemFunctions
+   * As {@link java.sql.DatabaseMetaData#getSystemFunctions}.
    */
   public static String getSystemFunctions() {
     return SYSTEM_FUNCTIONS;
@@ -581,15 +581,15 @@ public class SqlJdbcFunctionCall extends SqlFunction {
       this.operator = operator;
     }
 
-    public SqlOperator getOperator() {
+    @Override public SqlOperator getOperator() {
       return operator;
     }
 
-    public SqlCall createCall(SqlParserPos pos, SqlNode... operands) {
+    @Override public SqlCall createCall(SqlParserPos pos, SqlNode... operands) {
       return operator.createCall(pos, operands);
     }
 
-    public String isValidArgCount(SqlCallBinding binding) {
+    @Override public String isValidArgCount(SqlCallBinding binding) {
       return null; // any number of arguments is valid
     }
   }
@@ -657,7 +657,7 @@ public class SqlJdbcFunctionCall extends SqlFunction {
   }
 
   /**
-   * Lookup table between JDBC functions and internal representation
+   * Lookup table between JDBC functions and internal representation.
    */
   private static class JdbcToInternalLookupTable {
     /**

@@ -18,13 +18,11 @@ package org.apache.calcite.adapter.tpch;
 
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.test.CalciteAssert;
-import org.apache.calcite.util.Bug;
 import org.apache.calcite.util.TestUtil;
 
 import com.google.common.collect.ImmutableList;
 
 import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -34,14 +32,12 @@ import java.util.concurrent.TimeUnit;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Unit test for {@link org.apache.calcite.adapter.tpch.TpchSchema}.
  *
  * <p>Because the TPC-H data generator takes time and memory to instantiate,
  * tests only run as part of slow tests.</p>
  */
-@Tag("slow")
 class TpchTest {
   public static final boolean ENABLE = TestUtil.getJavaMajorVersion() >= 7;
 
@@ -51,7 +47,7 @@ class TpchTest {
         + "       name: '" + name + "',\n"
         + "       factory: 'org.apache.calcite.adapter.tpch.TpchSchemaFactory',\n"
         + "       operand: {\n"
-        + "         columnPrefix: true,\n"
+        + "         columnPrefix: false,\n"
         + "         scale: " + scaleFactor + "\n"
         + "       }\n"
         + "     }";
@@ -823,12 +819,10 @@ class TpchTest {
     checkQuery(1);
   }
 
-  @Disabled("Infinite planning")
   @Test void testQuery02() {
     checkQuery(2);
   }
 
-  @Disabled("Infinite planning")
   @Test void testQuery02Conversion() {
     query(2)
         .convertMatches(relNode -> {
@@ -842,12 +836,10 @@ class TpchTest {
     checkQuery(3);
   }
 
-  @Disabled("NoSuchMethodException: SqlFunctions.lt(Date, Date)")
   @Test void testQuery04() {
     checkQuery(4);
   }
 
-  @Disabled("OutOfMemoryError")
   @Test void testQuery05() {
     checkQuery(5);
   }
@@ -857,7 +849,6 @@ class TpchTest {
   }
 
   @Test void testQuery07() {
-    assumeTrue(Bug.CALCITE_2223_FIXED);
     checkQuery(7);
   }
 
@@ -865,7 +856,6 @@ class TpchTest {
     checkQuery(8);
   }
 
-  @Disabled("no method found")
   @Test void testQuery09() {
     checkQuery(9);
   }
@@ -874,17 +864,14 @@ class TpchTest {
     checkQuery(10);
   }
 
-  @Disabled("CannotPlanException")
   @Test void testQuery11() {
     checkQuery(11);
   }
 
-  @Disabled("NoSuchMethodException: SqlFunctions.lt(Date, Date)")
   @Test void testQuery12() {
     checkQuery(12);
   }
 
-  @Disabled("CannotPlanException")
   @Test void testQuery13() {
     checkQuery(13);
   }
@@ -893,7 +880,6 @@ class TpchTest {
     checkQuery(14);
   }
 
-  @Disabled("AssertionError")
   @Test void testQuery15() {
     checkQuery(15);
   }
@@ -925,7 +911,6 @@ class TpchTest {
     checkQuery(21);
   }
 
-  @Disabled("IllegalArgumentException during decorrelation")
   @Test void testQuery22() {
     checkQuery(22);
   }

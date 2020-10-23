@@ -152,68 +152,46 @@ class RelOptUtilTest {
    * <a href="https://issues.apache.org/jira/browse/CALCITE-3136">[CALCITE-3136]
    * Fix the default rule description of ConverterRule</a>. */
   @Test void testConvertRuleDefaultRuleDescription() {
-    RelCollation collation1 =
-            RelCollations.of(new RelFieldCollation(4, RelFieldCollation.Direction.DESCENDING));
-    RelCollation collation2 =
-            RelCollations.of(new RelFieldCollation(0, RelFieldCollation.Direction.DESCENDING));
-    RelDistribution distribution1 = RelDistributions.hash(ImmutableList.of(0, 1));
-    RelDistribution distribution2 =  RelDistributions.range(ImmutableList.of());
-    RelOptRule collationConvertRule = new ConverterRule(RelNode.class,
-            collation1,
-            collation2,
-            null) {
-      @Override public RelNode convert(RelNode rel) {
-        return null;
-      }
-    };
-    RelOptRule distributionConvertRule = new ConverterRule(RelNode.class,
-            distribution1,
-            distribution2,
-            null) {
-      @Override public RelNode convert(RelNode rel) {
-        return null;
-      }
-    };
-    RelOptRule compositeConvertRule = new ConverterRule(RelNode.class,
+    final RelCollation collation1 =
+        RelCollations.of(new RelFieldCollation(4, RelFieldCollation.Direction.DESCENDING));
+    final RelCollation collation2 =
+        RelCollations.of(new RelFieldCollation(0, RelFieldCollation.Direction.DESCENDING));
+    final RelDistribution distribution1 = RelDistributions.hash(ImmutableList.of(0, 1));
+    final RelDistribution distribution2 = RelDistributions.range(ImmutableList.of());
+    final RelOptRule collationConvertRule =
+        MyConverterRule.create(collation1, collation2);
+    final RelOptRule distributionConvertRule =
+        MyConverterRule.create(distribution1, distribution2);
+    final RelOptRule compositeConvertRule =
+        MyConverterRule.create(
             RelCompositeTrait.of(RelCollationTraitDef.INSTANCE,
-                    ImmutableList.of(collation2, collation1)),
+                ImmutableList.of(collation2, collation1)),
             RelCompositeTrait.of(RelCollationTraitDef.INSTANCE,
-                    ImmutableList.of(collation1)),
-            null) {
-      @Override public RelNode convert(RelNode rel) {
-        return null;
-      }
-    };
-    RelOptRule compositeConvertRule0 = new ConverterRule(RelNode.class,
+                ImmutableList.of(collation1)));
+    final RelOptRule compositeConvertRule0 =
+        MyConverterRule.create(
             RelCompositeTrait.of(RelDistributionTraitDef.INSTANCE,
-                    ImmutableList.of(distribution1, distribution2)),
+                ImmutableList.of(distribution1, distribution2)),
             RelCompositeTrait.of(RelDistributionTraitDef.INSTANCE,
-                    ImmutableList.of(distribution1)),
-            null) {
-      @Override public RelNode convert(RelNode rel) {
-        return null;
-      }
-    };
-    assertEquals("ConverterRule(in:[4 DESC],out:[0 DESC])", collationConvertRule.toString());
-    assertEquals("ConverterRule(in:hash[0, 1],out:range)", distributionConvertRule.toString());
-    assertEquals("ConverterRule(in:[[0 DESC], [4 DESC]],out:[4 DESC])",
-            compositeConvertRule.toString());
-    assertEquals("ConverterRule(in:[hash[0, 1], range],out:hash[0, 1])",
-            compositeConvertRule0.toString());
+                ImmutableList.of(distribution1)));
+    assertThat(collationConvertRule.toString(),
+        is("ConverterRule(in:[4 DESC],out:[0 DESC])"));
+    assertThat(distributionConvertRule.toString(),
+        is("ConverterRule(in:hash[0, 1],out:range)"));
+    assertThat(compositeConvertRule.toString(),
+        is("ConverterRule(in:[[0 DESC], [4 DESC]],out:[4 DESC])"));
+    assertThat(compositeConvertRule0.toString(),
+        is("ConverterRule(in:[hash[0, 1], range],out:hash[0, 1])"));
     try {
       Util.discard(
-              new ConverterRule(RelNode.class,
+          MyConverterRule.create(
               new Convention.Impl("{sourceConvention}", RelNode.class),
-              new Convention.Impl("<targetConvention>", RelNode.class),
-              null) {
-          @Override public RelNode convert(RelNode rel) {
-            return null;
-          } });
+              new Convention.Impl("<targetConvention>", RelNode.class)));
       fail("expected exception");
     } catch (RuntimeException e) {
-      assertEquals(
-              "Rule description 'ConverterRule(in:{sourceConvention},out:<targetConvention>)' is not valid",
-              e.getMessage());
+      assertThat(e.getMessage(),
+          is("Rule description 'ConverterRule(in:{sourceConvention},"
+              + "out:<targetConvention>)' is not valid"));
     }
   }
 
@@ -258,8 +236,8 @@ class RelOptUtilTest {
   }
 
   /**
-   * Test {@link RelOptUtil#splitJoinCondition(RelNode, RelNode, RexNode, List, List, List)}
-   * where the join condition contains an expanded version of IS NOT DISTINCT
+   * Tests {@link RelOptUtil#splitJoinCondition(RelNode, RelNode, RexNode, List, List, List)}
+   * where the join condition contains an expanded version of IS NOT DISTINCT.
    */
   @Test void testSplitJoinConditionExpandedIsNotDistinctFrom() {
     int leftJoinIndex = empScan.getRowType().getFieldNames().indexOf("DEPTNO");
@@ -283,8 +261,9 @@ class RelOptUtilTest {
   }
 
   /**
-   * Test {@link RelOptUtil#splitJoinCondition(RelNode, RelNode, RexNode, List, List, List)}
-   * where the join condition contains an expanded version of IS NOT DISTINCT using CASE
+   * Tests {@link RelOptUtil#splitJoinCondition(RelNode, RelNode, RexNode, List, List, List)}
+   * where the join condition contains an expanded version of IS NOT DISTINCT
+   * using CASE.
    */
   @Test void testSplitJoinConditionExpandedIsNotDistinctFromUsingCase() {
     int leftJoinIndex = empScan.getRowType().getFieldNames().indexOf("DEPTNO");
@@ -309,8 +288,9 @@ class RelOptUtilTest {
   }
 
   /**
-   * Test {@link RelOptUtil#splitJoinCondition(RelNode, RelNode, RexNode, List, List, List)}
-   * where the join condition contains an expanded version of IS NOT DISTINCT using CASE
+   * Tests {@link RelOptUtil#splitJoinCondition(RelNode, RelNode, RexNode, List, List, List)}
+   * where the join condition contains an expanded version of IS NOT DISTINCT
+   * using CASE.
    */
   @Test void testSplitJoinConditionExpandedIsNotDistinctFromUsingCase2() {
     int leftJoinIndex = empScan.getRowType().getFieldNames().indexOf("DEPTNO");
@@ -350,8 +330,8 @@ class RelOptUtilTest {
   }
 
   /**
-   * Test {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
-   * where the join condition contains a complex expression
+   * Tests {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
+   * where the join condition contains a complex expression.
    */
   @Test void testPushDownJoinConditions() {
     int leftJoinIndex = empScan.getRowType().getFieldNames().indexOf("DEPTNO");
@@ -389,14 +369,14 @@ class RelOptUtilTest {
             .toString()));
     assertThat(newJoin.getLeft(), is(instanceOf(Project.class)));
     Project leftInput = (Project) newJoin.getLeft();
-    assertThat(leftInput.getChildExps().get(empRow.getFieldCount()).toString(),
+    assertThat(leftInput.getProjects().get(empRow.getFieldCount()).toString(),
         is(relBuilder.call(SqlStdOperatorTable.PLUS, leftKeyInputRef, relBuilder.literal(1))
             .toString()));
   }
 
   /**
-   * Test {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
-   * where the join condition contains a complex expression
+   * Tests {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
+   * where the join condition contains a complex expression.
    */
   @Test void testPushDownJoinConditionsWithIsNotDistinct() {
     int leftJoinIndex = empScan.getRowType().getFieldNames().indexOf("DEPTNO");
@@ -434,15 +414,14 @@ class RelOptUtilTest {
             .toString()));
     assertThat(newJoin.getLeft(), is(instanceOf(Project.class)));
     Project leftInput = (Project) newJoin.getLeft();
-    assertThat(leftInput.getChildExps().get(empRow.getFieldCount()).toString(),
+    assertThat(leftInput.getProjects().get(empRow.getFieldCount()).toString(),
         is(relBuilder.call(SqlStdOperatorTable.PLUS, leftKeyInputRef, relBuilder.literal(1))
             .toString()));
-
   }
 
   /**
-   * Test {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
-   * where the join condition contains a complex expression
+   * Tests {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
+   * where the join condition contains a complex expression.
    */
   @Test void testPushDownJoinConditionsWithExpandedIsNotDistinct() {
     int leftJoinIndex = empScan.getRowType().getFieldNames().indexOf("DEPTNO");
@@ -486,14 +465,14 @@ class RelOptUtilTest {
                 .toString()));
     assertThat(newJoin.getLeft(), is(instanceOf(Project.class)));
     Project leftInput = (Project) newJoin.getLeft();
-    assertThat(leftInput.getChildExps().get(empRow.getFieldCount()).toString(),
+    assertThat(leftInput.getProjects().get(empRow.getFieldCount()).toString(),
         is(relBuilder.call(SqlStdOperatorTable.PLUS, leftKeyInputRef, relBuilder.literal(1))
             .toString()));
   }
 
   /**
-   * Test {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
-   * where the join condition contains a complex expression
+   * Tests {@link RelOptUtil#pushDownJoinConditions(org.apache.calcite.rel.core.Join, RelBuilder)}
+   * where the join condition contains a complex expression.
    */
   @Test void testPushDownJoinConditionsWithExpandedIsNotDistinctUsingCase() {
     int leftJoinIndex = empScan.getRowType().getFieldNames().indexOf("DEPTNO");
@@ -538,7 +517,7 @@ class RelOptUtilTest {
               .toString()));
     assertThat(newJoin.getLeft(), is(instanceOf(Project.class)));
     Project leftInput = (Project) newJoin.getLeft();
-    assertThat(leftInput.getChildExps().get(empRow.getFieldCount()).toString(),
+    assertThat(leftInput.getProjects().get(empRow.getFieldCount()).toString(),
         is(relBuilder.call(SqlStdOperatorTable.PLUS, leftKeyInputRef, relBuilder.literal(1))
             .toString()));
   }
@@ -595,7 +574,7 @@ class RelOptUtilTest {
                 RexInputRef.of(2, agg.getRowType()),
                 true))
         .build();
-    assertThat(RelOptUtil.toString(castNode), is(RelOptUtil.toString(expectNode)));
+    assertThat(castNode.explain(), is(expectNode.explain()));
 
     // Cast with row type(change field name):
     // RecordType(SMALLINT NOT NULL EMPNO, VARCHAR(10) ENAME, BIGINT NOT NULL JOB_CNT) NOT NULL
@@ -619,7 +598,7 @@ class RelOptUtilTest {
                 fieldEmpno.getName(),
                 fieldEname.getName(),
                 "JOB_CNT"));
-    assertThat(RelOptUtil.toString(castNode1), is(RelOptUtil.toString(expectNode1)));
+    assertThat(castNode1.explain(), is(expectNode1.explain()));
     // Change the field JOB_CNT field name again.
     // The projection expect to be merged.
     final RelDataType castRowType2 = typeFactory
@@ -642,6 +621,24 @@ class RelOptUtilTest {
                 fieldEmpno.getName(),
                 fieldEname.getName(),
                 "JOB_CNT2"));
-    assertThat(RelOptUtil.toString(castNode2), is(RelOptUtil.toString(expectNode2)));
+    assertThat(castNode2.explain(), is(expectNode2.explain()));
+  }
+
+  /** Dummy sub-class of ConverterRule, to check whether generated descriptions
+   * are OK. */
+  private static class MyConverterRule extends ConverterRule {
+    static MyConverterRule create(RelTrait in, RelTrait out) {
+      return Config.INSTANCE.withConversion(RelNode.class, in, out, null)
+          .withRuleFactory(MyConverterRule::new)
+          .toRule(MyConverterRule.class);
+    }
+
+    MyConverterRule(Config config) {
+      super(config);
+    }
+
+    @Override public RelNode convert(RelNode rel) {
+      throw new UnsupportedOperationException();
+    }
   }
 }

@@ -52,7 +52,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 import static org.hamcrest.CoreMatchers.allOf;
@@ -670,12 +670,12 @@ class LatticeSuggesterTest {
     t.addQuery(q0);
     assertThat(t.s.latticeMap.size(), is(1));
     assertThat(t.s.latticeMap.keySet().iterator().next(),
-        is("sales_fact_1997 (customer:+(2, $2)):[MIN(customer.fname)]"));
+        is("sales_fact_1997 (customer:+($2, 2)):[MIN(customer.fname)]"));
     assertThat(t.s.space.g.toString(),
         is("graph(vertices: [[foodmart, customer],"
             + " [foodmart, sales_fact_1997]], "
             + "edges: [Step([foodmart, sales_fact_1997],"
-            + " [foodmart, customer], +(2, $2):+(1, $0))])"));
+            + " [foodmart, customer], +($2, 2):+($0, 1))])"));
   }
 
   /** Tests that we can run the suggester against non-JDBC schemas.
@@ -835,13 +835,11 @@ class LatticeSuggesterTest {
       return withConfig(builder().evolveLattice(evolve).build());
     }
 
-    private Tester withParser(
-        Function<SqlParser.ConfigBuilder, SqlParser.ConfigBuilder> transform) {
-      return withConfig(builder()
-          .parserConfig(
-              transform.apply(SqlParser.configBuilder(config.getParserConfig()))
-                  .build())
-          .build());
+    private Tester withParser(UnaryOperator<SqlParser.Config> transform) {
+      return withConfig(
+          builder()
+              .parserConfig(transform.apply(config.getParserConfig()))
+              .build());
     }
 
     Tester withDialect(SqlDialect dialect) {

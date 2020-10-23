@@ -61,6 +61,7 @@ public abstract class RexProgramBuilderBase {
   protected RexLiteral nullSmallInt;
   protected RexLiteral nullVarchar;
   protected RexLiteral nullDecimal;
+  protected RexLiteral nullVarbinary;
 
   private RelDataType nullableBool;
   private RelDataType nonNullableBool;
@@ -76,6 +77,9 @@ public abstract class RexProgramBuilderBase {
 
   private RelDataType nullableDecimal;
   private RelDataType nonNullableDecimal;
+
+  private RelDataType nullableVarbinary;
+  private RelDataType nonNullableVarbinary;
 
   // Note: JUnit 4 creates new instance for each test method,
   // so we initialize these structures on demand
@@ -142,6 +146,10 @@ public abstract class RexProgramBuilderBase {
     nonNullableDecimal = typeFactory.createSqlType(SqlTypeName.DECIMAL);
     nullableDecimal = typeFactory.createTypeWithNullability(nonNullableDecimal, true);
     nullDecimal = rexBuilder.makeNullLiteral(nullableDecimal);
+
+    nonNullableVarbinary = typeFactory.createSqlType(SqlTypeName.VARBINARY);
+    nullableVarbinary = typeFactory.createTypeWithNullability(nonNullableVarbinary, true);
+    nullVarbinary = rexBuilder.makeNullLiteral(nullableVarbinary);
   }
 
   private RexDynamicParam getDynamicParam(RelDataType type, String fieldNamePrefix) {
@@ -298,6 +306,14 @@ public abstract class RexProgramBuilderBase {
     return rexBuilder.makeCall(SqlStdOperatorTable.GREATER_THAN, n1, n2);
   }
 
+  protected RexNode like(RexNode ref, RexNode pattern) {
+    return rexBuilder.makeCall(SqlStdOperatorTable.LIKE, ref, pattern);
+  }
+
+  protected RexNode like(RexNode ref, RexNode pattern, RexNode escape) {
+    return rexBuilder.makeCall(SqlStdOperatorTable.LIKE, ref, pattern, escape);
+  }
+
   protected RexNode plus(RexNode n1, RexNode n2) {
     return rexBuilder.makeCall(SqlStdOperatorTable.PLUS, n1, n2);
   }
@@ -335,14 +351,15 @@ public abstract class RexProgramBuilderBase {
   }
 
   /**
-   * Generates {@code x IN (y, z)} expression when called as {@code in(x, y, z)}.
+   * Generates {@code x IN (y, z)} expression when called as
+   * {@code in(x, y, z)}.
+   *
    * @param node left side of the IN expression
    * @param nodes nodes in the right side of IN expression
    * @return IN expression
    */
   protected RexNode in(RexNode node, RexNode... nodes) {
-    return rexBuilder.makeCall(SqlStdOperatorTable.IN,
-        ImmutableList.<RexNode>builder().add(node).add(nodes).build());
+    return rexBuilder.makeIn(node, ImmutableList.copyOf(nodes));
   }
 
   // Types
@@ -430,6 +447,15 @@ public abstract class RexProgramBuilderBase {
     return type;
   }
 
+  protected RelDataType tVarbinary() {
+    return nonNullableVarbinary;
+  }
+
+  protected RelDataType tVarbinary(boolean nullable) {
+    return nullable ? nullableVarbinary : nonNullableVarbinary;
+  }
+
+
   protected RelDataType tArray(RelDataType elemType) {
     return typeFactory.createArrayType(elemType, -1);
   }
@@ -446,41 +472,42 @@ public abstract class RexProgramBuilderBase {
     return rexBuilder.makeNullLiteral(nullable(type));
   }
 
-  protected RexNode literal(boolean value) {
-    return rexBuilder.makeLiteral(value, nonNullableBool, false);
+  protected RexLiteral literal(boolean value) {
+    return (RexLiteral) rexBuilder.makeLiteral(value, nonNullableBool, false);
   }
 
-  protected RexNode literal(Boolean value) {
+  protected RexLiteral literal(Boolean value) {
     if (value == null) {
       return rexBuilder.makeNullLiteral(nullableBool);
     }
     return literal(value.booleanValue());
   }
 
-  protected RexNode literal(int value) {
-    return rexBuilder.makeLiteral(value, nonNullableInt, false);
+  protected RexLiteral literal(int value) {
+    return (RexLiteral) rexBuilder.makeLiteral(value, nonNullableInt, false);
   }
 
-  protected RexNode literal(BigDecimal value) {
+  protected RexLiteral literal(BigDecimal value) {
     return rexBuilder.makeExactLiteral(value);
   }
 
-  protected RexNode literal(BigDecimal value, RelDataType type) {
+  protected RexLiteral literal(BigDecimal value, RelDataType type) {
     return rexBuilder.makeExactLiteral(value, type);
   }
 
-  protected RexNode literal(Integer value) {
+  protected RexLiteral literal(Integer value) {
     if (value == null) {
       return rexBuilder.makeNullLiteral(nullableInt);
     }
     return literal(value.intValue());
   }
 
-  protected RexNode literal(String value) {
+  protected RexLiteral literal(String value) {
     if (value == null) {
       return rexBuilder.makeNullLiteral(nullableVarchar);
     }
-    return rexBuilder.makeLiteral(value, nonNullableVarchar, false);
+    return (RexLiteral) rexBuilder.makeLiteral(value, nonNullableVarchar,
+        false);
   }
 
   // Variables

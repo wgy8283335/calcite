@@ -19,6 +19,7 @@ package org.apache.calcite.tools;
 import org.apache.calcite.DataContext;
 import org.apache.calcite.adapter.enumerable.EnumerableConvention;
 import org.apache.calcite.adapter.enumerable.EnumerableTableScan;
+import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.config.CalciteConnectionConfigImpl;
 import org.apache.calcite.config.CalciteConnectionProperty;
 import org.apache.calcite.config.CalciteSystemProperty;
@@ -41,7 +42,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.TableModify;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalTableModify;
-import org.apache.calcite.rel.rules.ProjectTableScanRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeSystem;
@@ -291,8 +292,7 @@ public class FrameworksTest {
     assertThat("retrieves default because not set", c2.schema(), nullValue());
 
     // Create a config similar to c2 but starting from an empty Properties.
-    final CalciteConnectionConfigImpl c3 =
-        new CalciteConnectionConfigImpl(new Properties());
+    final CalciteConnectionConfigImpl c3 = CalciteConnectionConfig.DEFAULT;
     final CalciteConnectionConfigImpl c4 = c3
         .set(lenientOperatorLookup, Boolean.toString(true))
         .set(caseSensitive, Boolean.toString(true));
@@ -392,23 +392,23 @@ public class FrameworksTest {
     traitDefs.add(ConventionTraitDef.INSTANCE);
     traitDefs.add(RelDistributionTraitDef.INSTANCE);
     SqlParser.Config parserConfig =
-            SqlParser.configBuilder(SqlParser.Config.DEFAULT)
-                    .setCaseSensitive(false)
-                    .build();
+        SqlParser.Config.DEFAULT
+            .withCaseSensitive(false);
 
     final FrameworkConfig config = Frameworks.newConfigBuilder()
-            .parserConfig(parserConfig)
-            .defaultSchema(schema)
-            .traitDefs(traitDefs)
-            // define the rules you want to apply
-            .ruleSets(
-                    RuleSets.ofList(AbstractConverter.ExpandConversionRule.INSTANCE,
-                            ProjectTableScanRule.INSTANCE))
-            .programs(Programs.ofRules(Programs.RULE_SET))
-            .build();
+        .parserConfig(parserConfig)
+        .defaultSchema(schema)
+        .traitDefs(traitDefs)
+        // define the rules you want to apply
+        .ruleSets(
+            RuleSets.ofList(AbstractConverter.ExpandConversionRule.INSTANCE,
+                CoreRules.PROJECT_TABLE_SCAN))
+        .programs(Programs.ofRules(Programs.RULE_SET))
+        .build();
 
-    executeQuery(config, "select min(id) as mi, max(id) as ma from mytable where id=1 group by id",
-            CalciteSystemProperty.DEBUG.value());
+    final String sql = "select min(id) as mi, max(id) as ma\n"
+        + "from mytable where id=1 group by id";
+    executeQuery(config, sql, CalciteSystemProperty.DEBUG.value());
   }
 
   /** Test case for
@@ -424,9 +424,8 @@ public class FrameworksTest {
     traitDefs.add(ConventionTraitDef.INSTANCE);
     traitDefs.add(RelDistributionTraitDef.INSTANCE);
     SqlParser.Config parserConfig =
-        SqlParser.configBuilder(SqlParser.Config.DEFAULT)
-            .setCaseSensitive(false)
-            .build();
+        SqlParser.Config.DEFAULT
+            .withCaseSensitive(false);
 
     final FrameworkConfig config = Frameworks.newConfigBuilder()
         .parserConfig(parserConfig)

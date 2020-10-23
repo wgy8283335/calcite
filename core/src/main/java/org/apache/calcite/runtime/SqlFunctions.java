@@ -33,6 +33,7 @@ import org.apache.calcite.linq4j.function.Function1;
 import org.apache.calcite.linq4j.function.NonDeterministic;
 import org.apache.calcite.linq4j.tree.Primitive;
 import org.apache.calcite.runtime.FlatLists.ComparableList;
+import org.apache.calcite.sql.fun.SqlLibraryOperators;
 import org.apache.calcite.util.NumberUtil;
 import org.apache.calcite.util.TimeWithTimeZoneString;
 import org.apache.calcite.util.TimestampWithTimeZoneString;
@@ -59,6 +60,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -66,11 +68,11 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BinaryOperator;
 import java.util.regex.Pattern;
 import javax.annotation.Nonnull;
 
@@ -92,6 +94,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 @SuppressWarnings("UnnecessaryUnboxing")
 @Deterministic
 public class SqlFunctions {
+  @SuppressWarnings("unused")
   private static final DecimalFormat DOUBLE_FORMAT =
       NumberUtil.decimalFormat("0.0E0");
 
@@ -117,6 +120,7 @@ public class SqlFunctions {
   private static final String[] POSIX_CHARACTER_CLASSES = new String[] { "Lower", "Upper", "ASCII",
       "Alpha", "XDigit", "Digit", "Alnum", "Punct", "Graph", "Print", "Blank", "Cntrl", "Space" };
 
+  @SuppressWarnings("unused")
   private static final Function1<Object[], Enumerable<Object[]>> ARRAY_CARTESIAN_PRODUCT =
       lists -> {
         final List<Enumerator<Object>> enumerators = new ArrayList<>();
@@ -125,7 +129,7 @@ public class SqlFunctions {
         }
         final Enumerator<List<Object>> product = Linq4j.product(enumerators);
         return new AbstractEnumerable<Object[]>() {
-          public Enumerator<Object[]> enumerator() {
+          @Override public Enumerator<Object[]> enumerator() {
             return Linq4j.transform(product, List::toArray);
           }
         };
@@ -637,6 +641,11 @@ public class SqlFunctions {
     return b0.equals(b1);
   }
 
+  /** SQL <code>=</code> operator applied to String values with a certain Comparator. */
+  public static boolean eq(String s0, String s1, Comparator<String> comparator) {
+    return comparator.compare(s0, s1) == 0;
+  }
+
   /** SQL <code>=</code> operator applied to Object values (at least one operand
    * has ANY type; neither may be null). */
   public static boolean eqAny(Object b0, Object b1) {
@@ -676,6 +685,11 @@ public class SqlFunctions {
     return !eq(b0, b1);
   }
 
+  /** SQL <code>&lt;gt;</code> operator applied to OString values with a certain Comparator. */
+  public static boolean ne(String s0, String s1, Comparator<String> comparator) {
+    return !eq(s0, s1, comparator);
+  }
+
   /** SQL <code>&lt;gt;</code> operator applied to Object values (at least one
    *  operand has ANY type, including String; neither may be null). */
   public static boolean neAny(Object b0, Object b1) {
@@ -692,6 +706,11 @@ public class SqlFunctions {
   /** SQL <code>&lt;</code> operator applied to String values. */
   public static boolean lt(String b0, String b1) {
     return b0.compareTo(b1) < 0;
+  }
+
+  /** SQL <code>&lt;</code> operator applied to String values. */
+  public static boolean lt(String b0, String b1, Comparator<String> comparator) {
+    return comparator.compare(b0, b1) < 0;
   }
 
   /** SQL <code>&lt;</code> operator applied to ByteString values. */
@@ -727,6 +746,11 @@ public class SqlFunctions {
   /** SQL <code>&le;</code> operator applied to String values. */
   public static boolean le(String b0, String b1) {
     return b0.compareTo(b1) <= 0;
+  }
+
+  /** SQL <code>&le;</code> operator applied to String values. */
+  public static boolean le(String b0, String b1, Comparator<String> comparator) {
+    return comparator.compare(b0, b1) <= 0;
   }
 
   /** SQL <code>&le;</code> operator applied to ByteString values. */
@@ -765,6 +789,11 @@ public class SqlFunctions {
     return b0.compareTo(b1) > 0;
   }
 
+  /** SQL <code>&gt;</code> operator applied to String values. */
+  public static boolean gt(String b0, String b1, Comparator<String> comparator) {
+    return comparator.compare(b0, b1) > 0;
+  }
+
   /** SQL <code>&gt;</code> operator applied to ByteString values. */
   public static boolean gt(ByteString b0, ByteString b1) {
     return b0.compareTo(b1) > 0;
@@ -799,6 +828,11 @@ public class SqlFunctions {
   /** SQL <code>&ge;</code> operator applied to String values. */
   public static boolean ge(String b0, String b1) {
     return b0.compareTo(b1) >= 0;
+  }
+
+  /** SQL <code>&ge;</code> operator applied to String values. */
+  public static boolean ge(String b0, String b1, Comparator<String> comparator) {
+    return comparator.compare(b0, b1) >= 0;
   }
 
   /** SQL <code>&ge;</code> operator applied to ByteString values. */
@@ -1077,22 +1111,64 @@ public class SqlFunctions {
         op, b1.getClass().toString()).ex();
   }
 
-  // &
-  /** Helper function for implementing <code>BIT_AND</code> */
+  /** Bitwise function <code>BIT_AND</code> applied to integer values. */
   public static long bitAnd(long b0, long b1) {
     return b0 & b1;
   }
 
-  // |
-  /** Helper function for implementing <code>BIT_OR</code> */
+  /** Bitwise function <code>BIT_AND</code> applied to binary values. */
+  public static ByteString bitAnd(ByteString b0, ByteString b1) {
+    return binaryOperator(b0, b1, (x, y) -> (byte) (x & y));
+  }
+
+  /** Bitwise function <code>BIT_OR</code> applied to integer values. */
   public static long bitOr(long b0, long b1) {
     return b0 | b1;
   }
 
-  // ^
-  /** Helper function for implementing <code>BIT_XOR</code> */
+  /** Bitwise function <code>BIT_OR</code> applied to binary values. */
+  public static ByteString bitOr(ByteString b0, ByteString b1) {
+    return binaryOperator(b0, b1, (x, y) -> (byte) (x | y));
+  }
+
+  /** Bitwise function <code>BIT_XOR</code> applied to integer values. */
   public static long bitXor(long b0, long b1) {
     return b0 ^ b1;
+  }
+
+  /** Bitwise function <code>BIT_XOR</code> applied to binary values. */
+  public static ByteString bitXor(ByteString b0, ByteString b1) {
+    return binaryOperator(b0, b1, (x, y) -> (byte) (x ^ y));
+  }
+
+  /**
+   * Utility for bitwise function applied to two byteString values.
+   *
+   * @param b0 The first byteString value operand of bitwise function.
+   * @param b1 The second byteString value operand of bitwise function.
+   * @param bitOp BitWise binary operator.
+   * @return ByteString after bitwise operation.
+   */
+  private static ByteString binaryOperator(
+      ByteString b0, ByteString b1, BinaryOperator<Byte> bitOp) {
+    if (b0.length() == 0) {
+      return b1;
+    }
+    if (b1.length() == 0) {
+      return b0;
+    }
+
+    if (b0.length() != b1.length()) {
+      throw RESOURCE.differentLengthForBitwiseOperands(
+          b0.length(), b1.length()).ex();
+    }
+
+    final byte[] result = new byte[b0.length()];
+    for (int i = 0; i < b0.length(); i++) {
+      result[i] = bitOp.apply(b0.byteAt(i), b1.byteAt(i));
+    }
+
+    return new ByteString(result);
   }
 
   // EXP
@@ -1743,7 +1819,7 @@ public class SqlFunctions {
 
   @NonDeterministic
   private static Object cannotConvert(Object o, Class toType) {
-    throw RESOURCE.cannotConvert(o.toString(), toType.toString()).ex();
+    throw RESOURCE.cannotConvert(String.valueOf(o), toType.toString()).ex();
   }
 
   /** CAST(VARCHAR AS BOOLEAN). */
@@ -1871,6 +1947,7 @@ public class SqlFunctions {
   }
 
   // mainly intended for java.sql.Timestamp but works for other dates also
+  @SuppressWarnings("JdkObsolete")
   public static long toLong(java.util.Date v, TimeZone timeZone) {
     final long time = v.getTime();
     return time + timeZone.getOffset(time);
@@ -2066,6 +2143,52 @@ public class SqlFunctions {
     return TimestampWithTimeZoneString.fromMillisSinceEpoch(v)
         .getLocalTimeString()
         .getMillisOfDay();
+  }
+
+  /** For {@link SqlLibraryOperators#TIMESTAMP_SECONDS}. */
+  public static long timestampSeconds(long v) {
+    return v * 1000;
+  }
+
+  /** For {@link SqlLibraryOperators#TIMESTAMP_MILLIS}. */
+  public static long timestampMillis(long v) {
+    // translation is trivial, because Calcite represents TIMESTAMP values as
+    // millis since epoch
+    return v;
+  }
+
+  /** For {@link SqlLibraryOperators#TIMESTAMP_MICROS}. */
+  public static long timestampMicros(long v) {
+    return v / 1000;
+  }
+
+  /** For {@link SqlLibraryOperators#UNIX_SECONDS}. */
+  public static long unixSeconds(long v) {
+    return v / 1000;
+  }
+
+  /** For {@link SqlLibraryOperators#UNIX_MILLIS}. */
+  public static long unixMillis(long v) {
+    // translation is trivial, because Calcite represents TIMESTAMP values as
+    // millis since epoch
+    return v;
+  }
+
+  /** For {@link SqlLibraryOperators#UNIX_MICROS}. */
+  public static long unixMicros(long v) {
+    return v * 1000;
+  }
+
+  /** For {@link SqlLibraryOperators#DATE_FROM_UNIX_DATE}. */
+  public static int dateFromUnixDate(int v) {
+    // translation is trivial, because Calcite represents dates as Unix integers
+    return v;
+  }
+
+  /** For {@link SqlLibraryOperators#UNIX_DATE}. */
+  public static int unixDate(int v) {
+    // translation is trivial, because Calcite represents dates as Unix integers
+    return v;
   }
 
   public static Long toTimestampWithLocalTimeZone(String v) {
@@ -2306,7 +2429,7 @@ public class SqlFunctions {
   public static int currentTime(DataContext root) {
     int time = (int) (currentTimestamp(root) % DateTimeUtils.MILLIS_PER_DAY);
     if (time < 0) {
-      time += DateTimeUtils.MILLIS_PER_DAY;
+      time = (int) (time + DateTimeUtils.MILLIS_PER_DAY);
     }
     return time;
   }
@@ -2529,8 +2652,10 @@ public class SqlFunctions {
   }
 
   /** Support the MULTISET EXCEPT ALL function. */
+  @SuppressWarnings("JdkObsolete")
   public static <E> Collection<E> multisetExceptAll(Collection<E> c1,
       Collection<E> c2) {
+    // TOOD: use Multisets?
     final List<E> result = new LinkedList<>(c1);
     for (E e : c2) {
       result.remove(e);
@@ -2563,11 +2688,13 @@ public class SqlFunctions {
   }
 
   /** Support the SUBMULTISET OF function. */
+  @SuppressWarnings("JdkObsolete")
   public static boolean submultisetOf(Collection possibleSubMultiset,
       Collection multiset) {
     if (possibleSubMultiset.size() > multiset.size()) {
       return false;
     }
+    // TODO: use Multisets?
     Collection multisetLocal = new LinkedList(multiset);
     for (Object e : possibleSubMultiset) {
       if (!multisetLocal.remove(e)) {
@@ -2595,6 +2722,46 @@ public class SqlFunctions {
     resultCollection.addAll(collection1);
     resultCollection.addAll(collection2);
     return resultCollection;
+  }
+
+  /**
+   * Function that, given a certain List containing single-item structs (i.e. arrays / lists with
+   * a single item), builds an Enumerable that returns those single items inside the structs.
+   */
+  public static Function1<Object, Enumerable<Comparable>> flatList() {
+    return inputObject -> {
+      final List list = (List) inputObject;
+      final Enumerator<List<Object>> enumerator = Linq4j.enumerator(list);
+      return new AbstractEnumerable<Comparable>() {
+        @Override public Enumerator<Comparable> enumerator() {
+          return new Enumerator<Comparable>() {
+
+            @Override public boolean moveNext() {
+              return enumerator.moveNext();
+            }
+
+            @Override public Comparable current() {
+              final Object element = enumerator.current();
+              final Comparable comparable;
+              if (element.getClass().isArray()) {
+                comparable = (Comparable) ((Object[]) element)[0];
+              } else {
+                comparable = (Comparable) ((List) element).get(0);
+              }
+              return comparable;
+            }
+
+            @Override public void reset() {
+              enumerator.reset();
+            }
+
+            @Override public void close() {
+              enumerator.close();
+            }
+          };
+        }
+      };
+    };
   }
 
   public static Function1<Object, Enumerable<ComparableList<Comparable>>> flatProduct(
@@ -2638,7 +2805,7 @@ public class SqlFunctions {
       case MAP:
         @SuppressWarnings("unchecked") Map<Comparable, Comparable> map =
             (Map<Comparable, Comparable>) inputObject;
-        Enumerator<Entry<Comparable, Comparable>> enumerator =
+        Enumerator<Map.Entry<Comparable, Comparable>> enumerator =
             Linq4j.enumerator(map.entrySet());
 
         Enumerator<List<Comparable>> transformed = Linq4j.transform(enumerator,
@@ -2670,7 +2837,7 @@ public class SqlFunctions {
       final List<Enumerator<List<E>>> enumerators, final int fieldCount,
       final boolean withOrdinality) {
     return new AbstractEnumerable<FlatLists.ComparableList<E>>() {
-      public Enumerator<FlatLists.ComparableList<E>> enumerator() {
+      @Override public Enumerator<FlatLists.ComparableList<E>> enumerator() {
         return new ProductComparableListEnumerator<>(enumerators, fieldCount,
             withOrdinality);
       }
@@ -2824,7 +2991,7 @@ public class SqlFunctions {
       return hasNext;
     }
 
-    public FlatLists.ComparableList<E> current() {
+    @Override public FlatLists.ComparableList<E> current() {
       int i = 0;
       for (Object element : (Object[]) elements) {
         Object[] a;

@@ -65,7 +65,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * Schema mapped onto a Cassandra column family
+ * Schema mapped onto a Cassandra column family.
  */
 public class CassandraSchema extends AbstractSchema {
   final Session session;
@@ -114,7 +114,7 @@ public class CassandraSchema extends AbstractSchema {
    */
   public CassandraSchema(String host, String keyspace, String username, String password,
         SchemaPlus parentSchema, String name) {
-    this(host, DEFAULT_CASSANDRA_PORT, keyspace, null, null, parentSchema, name);
+    this(host, DEFAULT_CASSANDRA_PORT, keyspace, username, password, parentSchema, name);
   }
 
   /**
@@ -149,7 +149,13 @@ public class CassandraSchema extends AbstractSchema {
     this.parentSchema = parentSchema;
     this.name = name;
 
-    this.hook = Hook.TRIMMED.add(node -> {
+    this.hook = prepareHook();
+  }
+
+  @SuppressWarnings("deprecation")
+  private Hook.Closeable prepareHook() {
+    // It adds a global hook, so it should probably be replaced with a thread-local hook
+    return Hook.TRIMMED.add(node -> {
       CassandraSchema.this.addMaterializedViews();
     });
   }
@@ -237,7 +243,7 @@ public class CassandraSchema extends AbstractSchema {
   }
 
   /**
-   * Get all primary key columns from the underlying CQL table
+   * Returns all primary key columns from the underlying CQL table.
    *
    * @return A list of field names that are part of the partition and clustering keys
    */
@@ -299,8 +305,7 @@ public class CassandraSchema extends AbstractSchema {
     return keyCollations;
   }
 
-  /** Add all materialized views defined in the schema to this column family
-   */
+  /** Adds all materialized views defined in the schema to this column family. */
   private void addMaterializedViews() {
     // Close the hook use to get us here
     hook.close();
@@ -328,12 +333,12 @@ public class CassandraSchema extends AbstractSchema {
 
       // Parse and unparse the view query to get properly quoted field names
       String query = queryBuilder.toString();
-      SqlParser.ConfigBuilder configBuilder = SqlParser.configBuilder();
-      configBuilder.setUnquotedCasing(Casing.UNCHANGED);
+      SqlParser.Config parserConfig = SqlParser.config()
+          .withUnquotedCasing(Casing.UNCHANGED);
 
       SqlSelect parsedQuery;
       try {
-        parsedQuery = (SqlSelect) SqlParser.create(query, configBuilder.build()).parseQuery();
+        parsedQuery = (SqlSelect) SqlParser.create(query, parserConfig).parseQuery();
       } catch (SqlParseException e) {
         LOGGER.warn("Could not parse query {} for CQL view {}.{}",
             query, keyspace, view.getName());

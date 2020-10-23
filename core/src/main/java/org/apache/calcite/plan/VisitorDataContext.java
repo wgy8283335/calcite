@@ -38,7 +38,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * DataContext for evaluating an RexExpression
+ * DataContext for evaluating a RexExpression.
  */
 public class VisitorDataContext implements DataContext {
   private static final CalciteLogger LOGGER =
@@ -50,19 +50,19 @@ public class VisitorDataContext implements DataContext {
     this.values = values;
   }
 
-  public SchemaPlus getRootSchema() {
+  @Override public SchemaPlus getRootSchema() {
     throw new RuntimeException("Unsupported");
   }
 
-  public JavaTypeFactory getTypeFactory() {
+  @Override public JavaTypeFactory getTypeFactory() {
     throw new RuntimeException("Unsupported");
   }
 
-  public QueryProvider getQueryProvider() {
+  @Override public QueryProvider getQueryProvider() {
     throw new RuntimeException("Unsupported");
   }
 
-  public Object get(String name) {
+  @Override public Object get(String name) {
     if (name.equals("inputRecord")) {
       return values;
     } else {

@@ -148,6 +148,7 @@ public class CalciteMetaImpl extends MetaImpl {
 
   @Override public void closeStatement(StatementHandle h) {
     final CalciteConnectionImpl calciteConnection = getConnection();
+    @SuppressWarnings("unused")
     final CalciteServerStatement stmt;
     try {
       stmt = calciteConnection.server.getStatement(h);
@@ -193,7 +194,7 @@ public class CalciteMetaImpl extends MetaImpl {
         cursorFactory, Frame.EMPTY);
   }
 
-  protected MetaResultSet createResultSet(
+  @Override protected MetaResultSet createResultSet(
       Map<String, Object> internalParameters, List<ColumnMetaData> columns,
       CursorFactory cursorFactory, final Frame firstFrame) {
     try {
@@ -249,7 +250,7 @@ public class CalciteMetaImpl extends MetaImpl {
     }
   }
 
-  public MetaResultSet getTables(ConnectionHandle ch,
+  @Override public MetaResultSet getTables(ConnectionHandle ch,
       String catalog,
       final Pat schemaPattern,
       final Pat tableNamePattern,
@@ -278,7 +279,7 @@ public class CalciteMetaImpl extends MetaImpl {
         "REF_GENERATION");
   }
 
-  public MetaResultSet getTypeInfo(ConnectionHandle ch) {
+  @Override public MetaResultSet getTypeInfo(ConnectionHandle ch) {
     return createResultSet(allTypeInfo(),
         MetaTypeInfo.class,
         "TYPE_NAME",
@@ -301,7 +302,7 @@ public class CalciteMetaImpl extends MetaImpl {
         "NUM_PREC_RADIX");
   }
 
-  public MetaResultSet getColumns(ConnectionHandle ch,
+  @Override public MetaResultSet getColumns(ConnectionHandle ch,
       String catalog,
       Pat schemaPattern,
       Pat tableNamePattern,
@@ -413,6 +414,10 @@ public class CalciteMetaImpl extends MetaImpl {
     final CalciteConnectionImpl conn = (CalciteConnectionImpl) connection;
     final RelDataTypeSystem typeSystem = conn.typeFactory.getTypeSystem();
     for (SqlTypeName sqlTypeName : SqlTypeName.values()) {
+      if (sqlTypeName.isSpecial()) {
+        // Skip internal types (NULL, ANY, SYMBOL, SARG).
+        continue;
+      }
       allTypeList.add(
           new MetaTypeInfo(sqlTypeName.getName(),
               sqlTypeName.getJdbcOrdinal(),
@@ -472,7 +477,8 @@ public class CalciteMetaImpl extends MetaImpl {
         });
   }
 
-  public MetaResultSet getSchemas(ConnectionHandle ch, String catalog, Pat schemaPattern) {
+  @Override public MetaResultSet getSchemas(ConnectionHandle ch, String catalog,
+      Pat schemaPattern) {
     final Predicate1<MetaSchema> schemaMatcher = namedMatcher(schemaPattern);
     return createResultSet(schemas(catalog).where(schemaMatcher),
         MetaSchema.class,
@@ -480,13 +486,13 @@ public class CalciteMetaImpl extends MetaImpl {
         "TABLE_CATALOG");
   }
 
-  public MetaResultSet getCatalogs(ConnectionHandle ch) {
+  @Override public MetaResultSet getCatalogs(ConnectionHandle ch) {
     return createResultSet(catalogs(),
         MetaCatalog.class,
         "TABLE_CAT");
   }
 
-  public MetaResultSet getTableTypes(ConnectionHandle ch) {
+  @Override public MetaResultSet getTableTypes(ConnectionHandle ch) {
     return createResultSet(tableTypes(),
         MetaTableType.class,
         "TABLE_TYPE");
@@ -672,19 +678,19 @@ public class CalciteMetaImpl extends MetaImpl {
           long updateCount;
           Signature signature;
 
-          public Object getMonitor() {
+          @Override public Object getMonitor() {
             return statement;
           }
 
-          public void clear() throws SQLException {}
+          @Override public void clear() throws SQLException {}
 
-          public void assign(Meta.Signature signature, Meta.Frame firstFrame,
+          @Override public void assign(Meta.Signature signature, Meta.Frame firstFrame,
               long updateCount) throws SQLException {
             this.signature = signature;
             this.updateCount = updateCount;
           }
 
-          public void execute() throws SQLException {
+          @Override public void execute() throws SQLException {
             if (signature.statementType.canUpdate()) {
               final Iterable<Object> iterable =
                   _createIterable(h, signature, ImmutableList.of(),
@@ -716,7 +722,7 @@ public class CalciteMetaImpl extends MetaImpl {
     return DRIVER.connect(schema, typeFactory);
   }
 
-  public boolean syncResults(StatementHandle h, QueryState state, long offset)
+  @Override public boolean syncResults(StatementHandle h, QueryState state, long offset)
       throws NoSuchStatementException {
     // Doesn't have application in Calcite itself.
     throw new UnsupportedOperationException();
@@ -761,7 +767,7 @@ public class CalciteMetaImpl extends MetaImpl {
       super(clazz);
     }
 
-    public RelDataType getRowType(RelDataTypeFactory typeFactory) {
+    @Override public RelDataType getRowType(RelDataTypeFactory typeFactory) {
       return ((JavaTypeFactory) typeFactory).createType(elementType);
     }
 
@@ -776,12 +782,12 @@ public class CalciteMetaImpl extends MetaImpl {
 
     protected abstract Enumerator<E> enumerator(CalciteMetaImpl connection);
 
-    public <T> Queryable<T> asQueryable(QueryProvider queryProvider,
+    @Override public <T> Queryable<T> asQueryable(QueryProvider queryProvider,
         SchemaPlus schema, String tableName) {
       return new AbstractTableQueryable<T>(queryProvider, schema, this,
           tableName) {
         @SuppressWarnings("unchecked")
-        public Enumerator<T> enumerator() {
+        @Override public Enumerator<T> enumerator() {
           return (Enumerator<T>) MetadataTable.this.enumerator(
               ((CalciteConnectionImpl) queryProvider).meta());
         }
@@ -810,16 +816,16 @@ public class CalciteMetaImpl extends MetaImpl {
       return new LimitIterator<>(iterator, limit);
     }
 
-    public boolean hasNext() {
+    @Override public boolean hasNext() {
       return iterator.hasNext() && i < limit;
     }
 
-    public E next() {
+    @Override public E next() {
       ++i;
       return iterator.next();
     }
 
-    public void remove() {
+    @Override public void remove() {
       throw new UnsupportedOperationException();
     }
   }

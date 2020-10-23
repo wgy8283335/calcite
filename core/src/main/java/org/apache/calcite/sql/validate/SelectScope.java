@@ -99,9 +99,7 @@ public class SelectScope extends ListScope {
    */
   private SqlNodeList orderList;
 
-  /**
-   * Scope to use to resolve windows
-   */
+  /** Scope to use to resolve windows. */
   private final SqlValidatorScope windowParent;
 
   //~ Constructors -----------------------------------------------------------
@@ -128,11 +126,11 @@ public class SelectScope extends ListScope {
     return null;
   }
 
-  public SqlSelect getNode() {
+  @Override public SqlSelect getNode() {
     return select;
   }
 
-  public SqlWindow lookupWindow(String name) {
+  @Override public SqlWindow lookupWindow(String name) {
     final SqlNodeList windowList = select.getWindowList();
     for (int i = 0; i < windowList.size(); i++) {
       SqlWindow window = (SqlWindow) windowList.get(i);
@@ -151,7 +149,7 @@ public class SelectScope extends ListScope {
     }
   }
 
-  public SqlMonotonicity getMonotonicity(SqlNode expr) {
+  @Override public SqlMonotonicity getMonotonicity(SqlNode expr) {
     SqlMonotonicity monotonicity = expr.getMonotonicity(this);
     if (monotonicity != SqlMonotonicity.NOT_MONOTONIC) {
       return monotonicity;
@@ -176,7 +174,7 @@ public class SelectScope extends ListScope {
     return SqlMonotonicity.NOT_MONOTONIC;
   }
 
-  public SqlNodeList getOrderList() {
+  @Override public SqlNodeList getOrderList() {
     if (orderList == null) {
       // Compute on demand first call.
       orderList = new SqlNodeList(SqlParserPos.ZERO);

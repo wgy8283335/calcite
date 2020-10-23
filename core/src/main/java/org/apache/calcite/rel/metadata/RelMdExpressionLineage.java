@@ -47,7 +47,6 @@ import org.apache.calcite.util.Util;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
 
 import java.util.ArrayList;
@@ -88,7 +87,7 @@ public class RelMdExpressionLineage
 
   //~ Methods ----------------------------------------------------------------
 
-  public MetadataDef<BuiltInMetadata.ExpressionLineage> getDef() {
+  @Override public MetadataDef<BuiltInMetadata.ExpressionLineage> getDef() {
     return BuiltInMetadata.ExpressionLineage.DEF;
   }
 
@@ -269,7 +268,7 @@ public class RelMdExpressionLineage
             null,
             ImmutableList.of());
         final Set<RexNode> updatedExprs = ImmutableSet.copyOf(
-            Iterables.transform(originalExprs, e ->
+            Util.transform(originalExprs, e ->
                 RexUtil.swapTableReferences(rexBuilder, e,
                     currentTablesMapping)));
         mapping.put(RexInputRef.of(idx, fullRowType), updatedExprs);
@@ -361,7 +360,7 @@ public class RelMdExpressionLineage
     // Infer column origin expressions for given references
     final Map<RexInputRef, Set<RexNode>> mapping = new LinkedHashMap<>();
     for (int idx : inputFieldsUsed) {
-      final RexNode inputExpr = rel.getChildExps().get(idx);
+      final RexNode inputExpr = rel.getProjects().get(idx);
       final Set<RexNode> originalExprs = mq.getExpressionLineage(input, inputExpr);
       if (originalExprs == null) {
         // Bail out
@@ -493,6 +492,6 @@ public class RelMdExpressionLineage
     final Set<RelDataTypeField> inputExtraFields = new LinkedHashSet<>();
     final RelOptUtil.InputFinder inputFinder = new RelOptUtil.InputFinder(inputExtraFields);
     expr.accept(inputFinder);
-    return inputFinder.inputBitSet.build();
+    return inputFinder.build();
   }
 }

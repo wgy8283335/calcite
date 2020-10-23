@@ -23,12 +23,10 @@ import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTrait;
 import org.apache.calcite.plan.RelTraitDef;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.Converter;
 import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Spool;
-import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.trace.CalciteTrace;
 
@@ -38,9 +36,7 @@ import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -76,15 +72,9 @@ class RelSet {
   RelNode rel;
 
   /**
-   * The position indicator of rel node that is to be processed.
+   * Exploring state of current RelSet.
    */
-  private int relCursor = 0;
-
-  /**
-   * The relnodes after applying logical rules and physical rules,
-   * before trait propagation and enforcement.
-   */
-  final Set<RelNode> seeds = new HashSet<>();
+  ExploringState exploringState;
 
   /**
    * Records conversions / enforcements that have happened on the
@@ -131,7 +121,7 @@ class RelSet {
   }
 
   /**
-   * Returns the child Relset for current set
+   * Returns the child RelSet for the current set.
    */
   public Set<RelSet> getChildSets(VolcanoPlanner planner) {
     Set<RelSet> childSets = new HashSet<>();
@@ -150,8 +140,8 @@ class RelSet {
   }
 
   /**
-   * @return all of the {@link RelNode}s contained by any subset of this set
-   * (does not include the subset objects themselves)
+   * Returns all of the {@link RelNode}s contained by any subset of this set
+   * (does not include the subset objects themselves).
    */
   public List<RelNode> getRelsFromAllSubsets() {
     return rels;
@@ -159,37 +149,11 @@ class RelSet {
 
   public RelSubset getSubset(RelTraitSet traits) {
     for (RelSubset subset : subsets) {
-      if (subset.getTraitSet() == traits) {
+      if (subset.getTraitSet().equals(traits)) {
         return subset;
       }
     }
     return null;
-  }
-
-  public int getSeedSize() {
-    if (seeds.isEmpty()) {
-      seeds.addAll(rels);
-    }
-    return seeds.size();
-  }
-
-  public boolean hasNextPhysicalNode() {
-    while (relCursor < rels.size()) {
-      RelNode node = rels.get(relCursor);
-      if (node instanceof PhysicalNode
-          && node.getConvention() != Convention.NONE) {
-        // enforcer may be manually created for some reason
-        if (relCursor < getSeedSize() || !node.isEnforcer()) {
-          return true;
-        }
-      }
-      relCursor++;
-    }
-    return false;
-  }
-
-  public RelNode nextPhysicalNode() {
-    return rels.get(relCursor++);
   }
 
   /**
@@ -236,9 +200,11 @@ class RelSet {
         to = subset;
       }
 
-      if (from == to || useAbstractConverter
-          && !from.getConvention().useAbstractConvertersForConversion(
-              from.getTraitSet(), to.getTraitSet())) {
+      if (from == to
+          || to.isEnforceDisabled()
+          || useAbstractConverter
+              && !from.getConvention().useAbstractConvertersForConversion(
+                  from.getTraitSet(), to.getTraitSet())) {
         continue;
       }
 
@@ -313,8 +279,8 @@ class RelSet {
       subset.setDelivered();
     }
 
-    if (needsConverter && !planner.topDownOpt) {
-      addConverters(subset, required, true);
+    if (needsConverter) {
+      addConverters(subset, required, !planner.topDownOpt);
     }
 
     return subset;
@@ -384,13 +350,12 @@ class RelSet {
     LOGGER.trace("Merge set#{} into set#{}", otherSet.id, id);
     otherSet.equivalentSet = this;
     RelOptCluster cluster = rel.getCluster();
-    RelMetadataQuery mq = cluster.getMetadataQuery();
 
     // remove from table
     boolean existed = planner.allSets.remove(otherSet);
     assert existed : "merging with a dead otherSet";
 
-    Map<RelSubset, RelNode> changedSubsets = new IdentityHashMap<>();
+    Set<RelNode> changedRels = new HashSet<>();
 
     // merge subsets
     for (RelSubset otherSubset : otherSet.subsets) {
@@ -408,9 +373,16 @@ class RelSet {
         subset = getOrCreateSubset(cluster, otherTraits, true);
       }
 
+      assert subset != null;
+      if (subset.passThroughCache == null) {
+        subset.passThroughCache = otherSubset.passThroughCache;
+      } else if (otherSubset.passThroughCache != null) {
+        subset.passThroughCache.addAll(otherSubset.passThroughCache);
+      }
+
       // collect RelSubset instances, whose best should be changed
       if (otherSubset.bestCost.isLt(subset.bestCost)) {
-        changedSubsets.put(subset, otherSubset.best);
+        changedRels.add(otherSubset.best);
       }
     }
 
@@ -434,17 +406,10 @@ class RelSet {
     // Has another set merged with this?
     assert equivalentSet == null;
 
-    // calls propagateCostImprovements() for RelSubset instances,
-    // whose best should be changed to check whether that
-    // subset's parents get cheaper.
-    Set<RelSubset> activeSet = new HashSet<>();
-    for (Map.Entry<RelSubset, RelNode> subsetBestPair : changedSubsets.entrySet()) {
-      RelSubset relSubset = subsetBestPair.getKey();
-      relSubset.propagateCostImprovements(
-          planner, mq, subsetBestPair.getValue(),
-          activeSet);
+    // propagate the new best information from changed relNodes.
+    for (RelNode rel : changedRels) {
+      planner.propagateCostImprovements(rel);
     }
-    assert activeSet.isEmpty();
 
     // Update all rels which have a child in the other set, to reflect the
     // fact that the child has been renamed.
@@ -465,12 +430,8 @@ class RelSet {
 
     // Make sure the cost changes as a result of merging are propagated.
     for (RelNode parentRel : getParentRels()) {
-      final RelSubset parentSubset = planner.getSubset(parentRel);
-      parentSubset.propagateCostImprovements(
-          planner, mq, parentRel,
-          activeSet);
+      planner.propagateCostImprovements(parentRel);
     }
-    assert activeSet.isEmpty();
     assert equivalentSet == null;
 
     // Each of the relations in the old set now has new parents, so
@@ -485,5 +446,24 @@ class RelSet {
     for (RelSubset subset : subsets) {
       planner.fireRules(subset);
     }
+  }
+
+  //~ Inner Classes ----------------------------------------------------------
+
+  /**
+   * An enum representing exploring state of current RelSet.
+   */
+  enum ExploringState {
+    /**
+     * The RelSet is exploring.
+     * It means all possible rule matches are scheduled, but not fully applied.
+     * This RelSet will refuse to explore again, but cannot provide a valid LB.
+     */
+    EXPLORING,
+
+    /**
+     * The RelSet is fully explored and is able to provide a valid LB.
+     */
+    EXPLORED
   }
 }

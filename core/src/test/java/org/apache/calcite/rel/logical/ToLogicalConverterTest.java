@@ -17,13 +17,12 @@
 package org.apache.calcite.rel.logical;
 
 import org.apache.calcite.adapter.enumerable.EnumerableConvention;
-import org.apache.calcite.adapter.enumerable.EnumerableInterpreterRule;
 import org.apache.calcite.adapter.enumerable.EnumerableRules;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.JoinRelType;
-import org.apache.calcite.rel.rules.ProjectToWindowRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rex.RexCorrelVariable;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.SqlNode;
@@ -48,6 +47,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.apache.calcite.test.Matchers.hasTree;
 
+import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 /**
@@ -56,7 +56,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 class ToLogicalConverterTest {
   private static final ImmutableSet<RelOptRule> RULE_SET =
       ImmutableSet.of(
-          ProjectToWindowRule.PROJECT,
+          CoreRules.PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW,
           EnumerableRules.ENUMERABLE_VALUES_RULE,
           EnumerableRules.ENUMERABLE_JOIN_RULE,
           EnumerableRules.ENUMERABLE_CORRELATE_RULE,
@@ -72,12 +72,10 @@ class ToLogicalConverterTest {
           EnumerableRules.ENUMERABLE_MINUS_RULE,
           EnumerableRules.ENUMERABLE_WINDOW_RULE,
           EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE,
-          EnumerableInterpreterRule.INSTANCE);
+          EnumerableRules.TO_INTERPRETER);
 
   private static final SqlToRelConverter.Config DEFAULT_REL_CONFIG =
-      SqlToRelConverter.configBuilder()
-          .withTrimUnusedFields(false)
-          .build();
+      SqlToRelConverter.config().withTrimUnusedFields(false);
 
   private static FrameworkConfig frameworkConfig() {
     final SchemaPlus rootSchema = Frameworks.createRootSchema(true);
@@ -294,6 +292,32 @@ class ToLogicalConverterTest {
         + "  LogicalTableScan(table=[[scott, EMP]])\n"
         + "  LogicalTableScan(table=[[scott, DEPT]])\n";
     verify(rel, expectedPhysical, expectedLogical);
+  }
+
+  @Test void testDeepEquals() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   JOIN dept ON emp.deptno = dept.deptno
+    final RelBuilder builder = builder();
+    RelNode[] rels = new RelNode[2];
+    for (int i = 0; i < 2; i++) {
+      rels[i] = builder.scan("EMP")
+          .scan("DEPT")
+          .join(JoinRelType.INNER,
+              builder.call(SqlStdOperatorTable.EQUALS,
+                  builder.field(2, 0, "DEPTNO"),
+                  builder.field(2, 1, "DEPTNO")))
+          .build();
+    }
+
+    // Currently, default implementation uses identity equals
+    assertThat(rels[0].equals(rels[1]), is(false));
+    assertThat(rels[0].getInput(0).equals(rels[1].getInput(0)), is(false));
+
+    // Deep equals and hashCode check
+    assertThat(rels[0].deepEquals(rels[1]), is(true));
+    assertThat(rels[0].deepHashCode() == rels[1].deepHashCode(), is(true));
   }
 
   @Test void testCorrelation() {

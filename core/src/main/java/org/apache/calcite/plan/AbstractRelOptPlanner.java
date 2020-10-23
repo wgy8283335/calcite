@@ -20,7 +20,6 @@ import org.apache.calcite.plan.volcano.RelSubset;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.metadata.RelMetadataProvider;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
-import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexExecutor;
 import org.apache.calcite.util.CancelFlag;
 import org.apache.calcite.util.Pair;
@@ -114,18 +113,18 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
 
   //~ Methods ----------------------------------------------------------------
 
-  public void clear() {}
+  @Override public void clear() {}
 
-  public Context getContext() {
+  @Override public Context getContext() {
     return context;
   }
 
-  public RelOptCostFactory getCostFactory() {
+  @Override public RelOptCostFactory getCostFactory() {
     return costFactory;
   }
 
   @SuppressWarnings("deprecation")
-  public void setCancelFlag(CancelFlag cancelFlag) {
+  @Override public void setCancelFlag(CancelFlag cancelFlag) {
     // ignored
   }
 
@@ -139,11 +138,11 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
     }
   }
 
-  public List<RelOptRule> getRules() {
+  @Override public List<RelOptRule> getRules() {
     return ImmutableList.copyOf(mapDescToRule.values());
   }
 
-  public boolean addRule(RelOptRule rule) {
+  @Override public boolean addRule(RelOptRule rule) {
     // Check that there isn't a rule with the same description
     final String description = rule.toString();
     assert description != null;
@@ -163,14 +162,14 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
     return true;
   }
 
-  public boolean removeRule(RelOptRule rule) {
+  @Override public boolean removeRule(RelOptRule rule) {
     String description = rule.toString();
     RelOptRule removed = mapDescToRule.remove(description);
     return removed != null;
   }
 
   /**
-   * Returns the rule with a given description
+   * Returns the rule with a given description.
    *
    * @param description Description
    * @return Rule with given description, or null if not found
@@ -179,7 +178,7 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
     return mapDescToRule.get(description);
   }
 
-  public void setRuleDescExclusionFilter(Pattern exclusionFilter) {
+  @Override public void setRuleDescExclusionFilter(Pattern exclusionFilter) {
     ruleDescExclusionFilter = exclusionFilter;
   }
 
@@ -194,38 +193,38 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
         && ruleDescExclusionFilter.matcher(rule.toString()).matches();
   }
 
-  public RelOptPlanner chooseDelegate() {
+  @Override public RelOptPlanner chooseDelegate() {
     return this;
   }
 
-  public void addMaterialization(RelOptMaterialization materialization) {
+  @Override public void addMaterialization(RelOptMaterialization materialization) {
     // ignore - this planner does not support materializations
   }
 
-  public List<RelOptMaterialization> getMaterializations() {
+  @Override public List<RelOptMaterialization> getMaterializations() {
     return ImmutableList.of();
   }
 
-  public void addLattice(RelOptLattice lattice) {
+  @Override public void addLattice(RelOptLattice lattice) {
     // ignore - this planner does not support lattices
   }
 
-  public RelOptLattice getLattice(RelOptTable table) {
+  @Override public RelOptLattice getLattice(RelOptTable table) {
     // this planner does not support lattices
     return null;
   }
 
-  public void registerSchema(RelOptSchema schema) {
+  @Override public void registerSchema(RelOptSchema schema) {
   }
 
-  public long getRelMetadataTimestamp(RelNode rel) {
+  @Override public long getRelMetadataTimestamp(RelNode rel) {
     return 0;
   }
 
   @Override public void prune(RelNode rel) {
   }
 
-  public void registerClass(RelNode node) {
+  @Override public void registerClass(RelNode node) {
     final Class<? extends RelNode> clazz = node.getClass();
     if (classes.add(clazz)) {
       onNewClass(node);
@@ -240,49 +239,49 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
     node.register(this);
   }
 
-  public RelTraitSet emptyTraitSet() {
+  @Override public RelTraitSet emptyTraitSet() {
     return RelTraitSet.createEmpty();
   }
 
-  public RelOptCost getCost(RelNode rel, RelMetadataQuery mq) {
+  @Override public RelOptCost getCost(RelNode rel, RelMetadataQuery mq) {
     return mq.getCumulativeCost(rel);
   }
 
-  @SuppressWarnings("deprecation")
+  @Override @SuppressWarnings("deprecation")
   public RelOptCost getCost(RelNode rel) {
     final RelMetadataQuery mq = rel.getCluster().getMetadataQuery();
     return getCost(rel, mq);
   }
 
-  public void addListener(RelOptListener newListener) {
+  @Override public void addListener(RelOptListener newListener) {
     if (listener == null) {
       listener = new MulticastRelOptListener();
     }
     listener.addListener(newListener);
   }
 
-  public void registerMetadataProviders(List<RelMetadataProvider> list) {
+  @Override public void registerMetadataProviders(List<RelMetadataProvider> list) {
   }
 
-  public boolean addRelTraitDef(RelTraitDef relTraitDef) {
+  @Override public boolean addRelTraitDef(RelTraitDef relTraitDef) {
     return false;
   }
 
-  public void clearRelTraitDefs() {}
+  @Override public void clearRelTraitDefs() {}
 
-  public List<RelTraitDef> getRelTraitDefs() {
+  @Override public List<RelTraitDef> getRelTraitDefs() {
     return ImmutableList.of();
   }
 
-  public void setExecutor(RexExecutor executor) {
+  @Override public void setExecutor(RexExecutor executor) {
     this.executor = executor;
   }
 
-  public RexExecutor getExecutor() {
+  @Override public RexExecutor getExecutor() {
     return executor;
   }
 
-  public void onCopy(RelNode rel, RelNode newRel) {
+  @Override public void onCopy(RelNode rel, RelNode newRel) {
     // do nothing
   }
 
@@ -412,12 +411,11 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
   }
 
   /**
-   * Takes care of tracing and listener notification when a rel is discarded
+   * Takes care of tracing and listener notification when a rel is discarded.
    *
-   * @param rel discarded rel
+   * @param rel Discarded rel
    */
-  protected void notifyDiscard(
-      RelNode rel) {
+  protected void notifyDiscard(RelNode rel) {
     if (listener != null) {
       RelOptListener.RelDiscardedEvent event =
           new RelOptListener.RelDiscardedEvent(
@@ -443,21 +441,8 @@ public abstract class AbstractRelOptPlanner implements RelOptPlanner {
     });
   }
 
-  /** Computes the key for relational expression digest cache. */
-  protected static Pair<String, List<RelDataType>> key(RelNode rel) {
-    return key(rel.getDigest(), rel.getRowType());
-  }
-
-  /** Computes the key for relational expression digest cache. */
-  protected static Pair<String, List<RelDataType>> key(String digest, RelDataType relType) {
-    final List<RelDataType> v = relType.isStruct()
-        ? Pair.right(relType.getFieldList())
-        : Collections.singletonList(relType);
-    return Pair.of(digest, v);
-  }
-
   /** Listener for counting the attempts of each rule. Only enabled under DEBUG level.*/
-  private class RuleAttemptsListener implements RelOptListener {
+  private static class RuleAttemptsListener implements RelOptListener {
     private long beforeTimestamp;
     private Map<String, Pair<Long, Long>> ruleAttempts;
 

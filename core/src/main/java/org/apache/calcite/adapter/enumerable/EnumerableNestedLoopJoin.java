@@ -19,6 +19,7 @@ package org.apache.calcite.adapter.enumerable;
 import org.apache.calcite.linq4j.tree.BlockBuilder;
 import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.linq4j.tree.Expressions;
+import org.apache.calcite.plan.DeriveMode;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -34,9 +35,11 @@ import org.apache.calcite.rel.metadata.RelMdUtil;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.util.BuiltInMethod;
+import org.apache.calcite.util.Pair;
 
 import com.google.common.collect.ImmutableList;
 
+import java.util.List;
 import java.util.Set;
 
 /** Implementation of {@link org.apache.calcite.rel.core.Join} in
@@ -118,7 +121,34 @@ public class EnumerableNestedLoopJoin extends Join implements EnumerableRel {
     return cost;
   }
 
-  public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
+  @Override public Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(
+      final RelTraitSet required) {
+    // EnumerableNestedLoopJoin traits passdown shall only pass through collation to
+    // left input. It is because for EnumerableNestedLoopJoin always
+    // uses left input as the outer loop, thus only left input can preserve ordering.
+    // Push sort both to left and right inputs does not help right outer join. It's because in
+    // implementation, EnumerableNestedLoopJoin produces (null, right_unmatched) all together,
+    // which does not preserve ordering from right side.
+    return EnumerableTraitsUtils.passThroughTraitsForJoin(
+        required, joinType, getLeft().getRowType().getFieldCount(), traitSet);
+  }
+
+  @Override public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
+      final RelTraitSet childTraits, final int childId) {
+    return EnumerableTraitsUtils.deriveTraitsForJoin(
+        childTraits, childId, joinType, traitSet, right.getTraitSet()
+    );
+  }
+
+  @Override public DeriveMode getDeriveMode() {
+    if (joinType == JoinRelType.FULL || joinType == JoinRelType.RIGHT) {
+      return DeriveMode.PROHIBITED;
+    }
+
+    return DeriveMode.LEFT_FIRST;
+  }
+
+  @Override public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
     final BlockBuilder builder = new BlockBuilder();
     final Result leftResult =
         implementor.visitChild(this, 0, (EnumerableRel) left, pref);

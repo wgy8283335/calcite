@@ -34,6 +34,7 @@ import org.apache.calcite.sql.SqlUpdate;
 import org.apache.calcite.sql.SqlWith;
 import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.calcite.sql.type.SqlOperandMetadata;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlValidator;
@@ -78,7 +79,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    * @param columnIndex Target column index
    * @param targetType  Target type to cast to
    */
-  public boolean rowTypeCoercion(
+  @Override public boolean rowTypeCoercion(
       SqlValidatorScope scope,
       SqlNode query,
       int columnIndex,
@@ -131,7 +132,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    * If the other operand is DECIMAL,
    * coerce the STRING operand to max precision/scale DECIMAL.
    */
-  public boolean binaryArithmeticCoercion(SqlCallBinding binding) {
+  @Override public boolean binaryArithmeticCoercion(SqlCallBinding binding) {
     // Assume the operator has NUMERIC family operand type checker.
     SqlOperator operator = binding.getOperator();
     SqlKind kind = operator.getKind();
@@ -195,15 +196,15 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    *   <li>For EQUALS(=) operator: 1. If operands are BOOLEAN and NUMERIC, evaluate
    *   `1=true` and `0=false` all to be true; 2. If operands are datetime and string,
    *   do nothing because the SqlToRelConverter already makes the type coercion;</li>
-   *   <li>For binary comparision [=, &gt;, &gt;=, &lt;, &lt;=]: try to find the common type,
-   *   i.e. "1 &gt; '1'" will be converted to "1 &gt; 1";</li>
+   *   <li>For binary comparison [=, &gt;, &gt;=, &lt;, &lt;=]: try to find the
+   *   common type, i.e. "1 &gt; '1'" will be converted to "1 &gt; 1";</li>
    *   <li>For BETWEEN operator, find the common comparison data type of all the operands,
    *   the common type is deduced from left to right, i.e. for expression "A between B and C",
    *   finds common comparison type D between A and B
    *   then common comparison type E between D and C as the final common type.</li>
    * </ul>
    */
-  public boolean binaryComparisonCoercion(SqlCallBinding binding) {
+  @Override public boolean binaryComparisonCoercion(SqlCallBinding binding) {
     SqlOperator operator = binding.getOperator();
     SqlKind kind = operator.getKind();
     int operandCnt = binding.getOperandCount();
@@ -220,7 +221,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
         // BOOLEAN and literal
         coerced = booleanEquality(binding, type1, type2) || coerced;
       }
-      // Binary comparision operator like: = > >= < <=
+      // Binary comparison operator like: = > >= < <=
       if (kind.belongsTo(SqlKind.BINARY_COMPARISON)) {
         final RelDataType commonType = commonTypeForBinaryComparison(type1, type2);
         if (null != commonType) {
@@ -375,7 +376,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    * operands and else operands to find a common type, then cast the operands to the common type
    * when needed.
    */
-  public boolean caseWhenCoercion(SqlCallBinding callBinding) {
+  @Override public boolean caseWhenCoercion(SqlCallBinding callBinding) {
     // For sql statement like:
     // `case when ... then (a, b, c) when ... then (d, e, f) else (g, h, i)`
     // an exception throws when entering this method.
@@ -409,7 +410,9 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
   }
 
   /**
-   * STRATEGIES
+   * {@inheritDoc}
+   *
+   * <p>STRATEGIES
    *
    * <p>With(Without) sub-query:
    *
@@ -442,14 +445,13 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    *                     |                          |
    *                     +-------------type3--------+
    *</pre>
-   *   </li>
    *   <li>For both basic sql types(LHS and RHS),
-   *   find the common type of LHS and RHS nodes.</li>
+   *   find the common type of LHS and RHS nodes.
    * </ul>
    */
-  public boolean inOperationCoercion(SqlCallBinding binding) {
+  @Override public boolean inOperationCoercion(SqlCallBinding binding) {
     SqlOperator operator = binding.getOperator();
-    if (operator.getKind() == SqlKind.IN) {
+    if (operator.getKind() == SqlKind.IN || operator.getKind() == SqlKind.NOT_IN) {
       assert binding.getOperandCount() == 2;
       final RelDataType type1 = binding.getOperandType(0);
       final RelDataType type2 = binding.getOperandType(1);
@@ -470,13 +472,13 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
       for (int i = 0; i < colCount; i++) {
         final int i2 = i;
         List<RelDataType> columnIthTypes = new AbstractList<RelDataType>() {
-          public RelDataType get(int index) {
+          @Override public RelDataType get(int index) {
             return argTypes[index].isStruct()
                 ? argTypes[index].getFieldList().get(i2).getType()
                 : argTypes[index];
           }
 
-          public int size() {
+          @Override public int size() {
             return argTypes.length;
           }
         };
@@ -540,7 +542,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
     return false;
   }
 
-  public boolean builtinFunctionCoercion(
+  @Override public boolean builtinFunctionCoercion(
       SqlCallBinding binding,
       List<RelDataType> operandTypes,
       List<SqlTypeFamily> expectedFamilies) {
@@ -560,19 +562,22 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
   }
 
   /**
-   * Type coercion for user defined functions(UDFs).
+   * Type coercion for user-defined functions (UDFs).
    */
-  public boolean userDefinedFunctionCoercion(SqlValidatorScope scope,
+  @Override public boolean userDefinedFunctionCoercion(SqlValidatorScope scope,
       SqlCall call, SqlFunction function) {
-    final List<RelDataType> paramTypes = function.getParamTypes();
-    assert paramTypes != null;
+    final SqlOperandMetadata operandMetadata =
+        (SqlOperandMetadata) function.getOperandTypeChecker();
+    final List<RelDataType> paramTypes =
+        operandMetadata.paramTypes(scope.getValidator().getTypeFactory());
     boolean coerced = false;
     for (int i = 0; i < call.operandCount(); i++) {
       SqlNode operand = call.operand(i);
       if (operand.getKind() == SqlKind.ARGUMENT_ASSIGNMENT) {
         final List<SqlNode> operandList = ((SqlCall) operand).getOperandList();
         String name = ((SqlIdentifier) operandList.get(1)).getSimple();
-        int formalIndex = function.getParamNames().indexOf(name);
+        final List<String> paramNames = operandMetadata.paramNames();
+        int formalIndex = paramNames.indexOf(name);
         if (formalIndex < 0) {
           return false;
         }
@@ -586,7 +591,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
     return coerced;
   }
 
-  public boolean querySourceCoercion(SqlValidatorScope scope,
+  @Override public boolean querySourceCoercion(SqlValidatorScope scope,
       RelDataType sourceRowType, RelDataType targetRowType, SqlNode query) {
     final List<RelDataTypeField> sourceFields = sourceRowType.getFieldList();
     final List<RelDataTypeField> targetFields = targetRowType.getFieldList();

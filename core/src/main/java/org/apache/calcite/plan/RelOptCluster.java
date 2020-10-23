@@ -201,9 +201,9 @@ public class RelOptCluster {
    * <p>Use <code>RelOptNode.getCluster().getHintStrategies()</code> to fetch
    * the hint strategies.
    *
-   * <p>Note that this method is only for internal use, the cluster {@code hintStrategies}
+   * <p>Note that this method is only for internal use; the cluster {@code hintStrategies}
    * would be always set up with the instance configured by
-   * {@link org.apache.calcite.sql2rel.SqlToRelConverter.ConfigBuilder}.
+   * {@link org.apache.calcite.sql2rel.SqlToRelConverter.Config}.
    *
    * @param hintStrategies The specified hint strategies to override the default one(empty)
    */
@@ -235,6 +235,7 @@ public class RelOptCluster {
     return emptyTraitSet;
   }
 
+  // CHECKSTYLE: IGNORE 2
   /** @deprecated For {@code traitSetOf(t1, t2)},
    * use {@link #traitSet}().replace(t1).replace(t2). */
   @Deprecated // to be removed before 2.0

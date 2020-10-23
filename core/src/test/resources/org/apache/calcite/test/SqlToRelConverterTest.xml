@@ -521,6 +521,59 @@ LogicalProject(DEPTNO=[$0], NUM=[$2])
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="testCorrelateSortWithLimit">
+        <Resource name="sql">
+            <![CDATA[SELECT deptno, ename
+FROM
+  (SELECT DISTINCT deptno FROM emp) t1,
+  LATERAL (
+    SELECT ename, sal
+    FROM emp
+    WHERE deptno = t1.deptno
+    ORDER BY sal
+    DESC LIMIT 3
+  )]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DEPTNO=[$0], ENAME=[$1])
+  LogicalCorrelate(correlation=[$cor0], joinType=[inner], requiredColumns=[{0}])
+    LogicalAggregate(group=[{0}])
+      LogicalProject(DEPTNO=[$7])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+    LogicalSort(sort0=[$1], dir0=[DESC], fetch=[3])
+      LogicalProject(ENAME=[$1], SAL=[$5])
+        LogicalFilter(condition=[=($7, $cor0.DEPTNO)])
+          LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testSortLimitWithCorrelateInput">
+        <Resource name="sql">
+            <![CDATA[SELECT deptno, ename
+    FROM
+        (SELECT DISTINCT deptno FROM emp) t1,
+          LATERAL (
+            SELECT ename, sal
+            FROM emp
+            WHERE deptno = t1.deptno)
+    ORDER BY ename DESC
+    LIMIT 3
+  )]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalSort(sort0=[$1], dir0=[DESC], fetch=[3])
+  LogicalProject(DEPTNO=[$0], ENAME=[$1])
+    LogicalJoin(condition=[=($0, $3)], joinType=[inner])
+      LogicalAggregate(group=[{0}])
+        LogicalProject(DEPTNO=[$7])
+          LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+      LogicalProject(ENAME=[$1], SAL=[$5], DEPTNO=[$7])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
     <TestCase name="testCorrelatedSubQueryInAggregate">
         <Resource name="sql">
             <![CDATA[SELECT SUM(
@@ -1046,7 +1099,9 @@ LogicalProject(ZIP=[$3])
 ]]>
         </Resource>
         <Resource name="sql">
-            <![CDATA[select empa.home_address.zip from sales.emp_address empa where empa.home_address.city = 'abc']]>
+            <![CDATA[select empa.home_address.zip
+from sales.emp_address empa
+where empa.home_address.city = 'abc']]>
         </Resource>
     </TestCase>
     <TestCase name="testSelectNestedColumnType">
@@ -1228,6 +1283,39 @@ LogicalProject(EXPR$0=[*($0, 3660000:INTERVAL HOUR TO MINUTE)])
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="testSelectNull">
+        <Resource name="sql">
+            <![CDATA[select null from emp]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(EXPR$0=[null:NULL])
+  LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testSelectNullWithAlias">
+        <Resource name="sql">
+            <![CDATA[select null as dummy from emp]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DUMMY=[null:NULL])
+  LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testSelectNullWithCast">
+        <Resource name="sql">
+            <![CDATA[select cast(null as timestamp) dummy from emp]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DUMMY=[null:TIMESTAMP(0)])
+  LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
     <TestCase name="testSelectDistinct">
         <Resource name="sql">
             <![CDATA[select distinct sal + 5 from emp]]>
@@ -1341,6 +1429,26 @@ from sales.dept_nested]]>
             <![CDATA[
 LogicalProject(EXPR$0=[JSON_TYPE(ROW($2.TYPE, $2.DESC, ROW($2.OTHERS.A, $2.OTHERS.B)))])
   LogicalTableScan(table=[[CATALOG, SALES, DEPT_NESTED]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testGroupingSetsRepeated">
+        <Resource name="sql">
+            <![CDATA[select deptno, group_id()
+from emp
+group by grouping sets (deptno, (), deptno)]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalUnion(all=[true])
+  LogicalProject(DEPTNO=[$0], EXPR$1=[0:BIGINT])
+    LogicalAggregate(group=[{0}], groups=[[{0}, {}]])
+      LogicalProject(DEPTNO=[$7])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+  LogicalProject(DEPTNO=[$0], EXPR$1=[1:BIGINT])
+    LogicalAggregate(group=[{0}])
+      LogicalProject(DEPTNO=[$7])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
 ]]>
         </Resource>
     </TestCase>
@@ -1749,7 +1857,7 @@ LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$
         <Resource name="plan">
             <![CDATA[
 LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8], DEPTNO0=[$9], NAME=[$10])
-  LogicalJoin(condition=[AND(=($7, $9), OR(=($0, 1), =($0, 3)))], joinType=[inner])
+  LogicalJoin(condition=[AND(=($7, $9), SEARCH($0, Sarg[1, 3]))], joinType=[inner])
     LogicalTableScan(table=[[CATALOG, SALES, EMP]])
     LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
 ]]>
@@ -2339,6 +2447,17 @@ LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="testIntervalExpression">
+        <Resource name="sql">
+            <![CDATA[select interval mgr hour as h from emp]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(H=[*($3, 3600000:INTERVAL HOUR)])
+  LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
     <TestCase name="testLateralDecorrelate">
         <Resource name="sql">
             <![CDATA[select * from emp,
@@ -2483,14 +2602,16 @@ LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$
         <Resource name="plan">
             <![CDATA[
 LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8])
-  LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8], DEPTNO0=[CAST($9):INTEGER], $f1=[CAST($10):BOOLEAN])
-    LogicalJoin(condition=[=($7, $9)], joinType=[inner])
-      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
-      LogicalAggregate(group=[{0}], agg#0=[MIN($1)])
-        LogicalProject(DEPTNO=[$1], $f0=[true])
-          LogicalSort(fetch=[1])
-            LogicalProject(EXPR$0=[1], DEPTNO=[$0])
-              LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+  LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8], $f0=[$9])
+    LogicalFilter(condition=[IS NOT NULL($9)])
+      LogicalCorrelate(correlation=[$cor0], joinType=[left], requiredColumns=[{7}])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+        LogicalAggregate(group=[{}], agg#0=[MIN($0)])
+          LogicalProject($f0=[true])
+            LogicalSort(fetch=[1])
+              LogicalProject(EXPR$0=[1])
+                LogicalFilter(condition=[=($cor0.DEPTNO, $0)])
+                  LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
 ]]>
         </Resource>
     </TestCase>
@@ -2612,7 +2733,7 @@ from emp]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-LogicalProject(EMPNO=[$0], EXPR$1=[OR(=($9, 0), AND(<($10, $9), null, <>($9, 0), IS NULL($13)), AND(<>($9, 0), IS NULL($13), >=($10, $9)))])
+LogicalProject(EMPNO=[$0], EXPR$1=[OR(=($9, 0), AND(<($10, $9), null, IS NULL($13)), AND(IS NULL($13), >=($10, $9)))])
   LogicalJoin(condition=[=($11, $12)], joinType=[left])
     LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8], $f0=[$9], $f1=[$10], DEPTNO0=[$7])
       LogicalJoin(condition=[true], joinType=[inner])
@@ -2756,7 +2877,7 @@ from emp]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-LogicalProject(EMPNO=[$0], EXPR$1=[OR(=($9, 0), AND(<($10, $9), null, <>($9, 0), IS NULL($13)), AND(<>($9, 0), IS NULL($13), >=($10, $9)))])
+LogicalProject(EMPNO=[$0], EXPR$1=[OR(=($9, 0), AND(<($10, $9), null, IS NULL($13)), AND(IS NULL($13), >=($10, $9)))])
   LogicalJoin(condition=[=($11, $12)], joinType=[left])
     LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8], $f0=[$9], $f1=[$10], DEPTNO0=[$7])
       LogicalJoin(condition=[true], joinType=[inner])
@@ -3606,7 +3727,7 @@ group by (CASE WHEN (deptno IN (10, 20)) THEN 0 ELSE deptno END)]]>
         <Resource name="plan">
             <![CDATA[
 LogicalAggregate(group=[{0}], EXPR$1=[MIN($1)])
-  LogicalProject(EXPR$0=[CASE(OR(=($7, 10), =($7, 20)), 0, $7)], EMPNO=[$0])
+  LogicalProject(EXPR$0=[CASE(SEARCH($7, Sarg[10, 20]), 0, $7)], EMPNO=[$0])
     LogicalTableScan(table=[[CATALOG, SALES, EMP]])
 ]]>
         </Resource>
@@ -3636,7 +3757,7 @@ group by deptno]]>
         <Resource name="plan">
             <![CDATA[
 LogicalAggregate(group=[{0}], EXPR$1=[SUM($1) FILTER $2], EXPR$2=[COUNT()])
-  LogicalProject(DEPTNO=[$7], $f1=[*($5, 2)], $f2=[AND(<>($0, 1), <>($0, 2))])
+  LogicalProject(DEPTNO=[$7], $f1=[*($5, 2)], $f2=[SEARCH($0, Sarg[(-∞..1), (1..2), (2..+∞)])])
     LogicalTableScan(table=[[CATALOG, SALES, EMP]])
 ]]>
         </Resource>
@@ -3714,6 +3835,18 @@ where exists (values 10)]]>
             <![CDATA[
 LogicalProject(DEPTNO=[$7])
   LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testReduceConstExpr">
+        <Resource name="sql">
+            <![CDATA[select sum(case when 'y' = 'n' then ename else 0.1 end) from emp]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalAggregate(group=[{}], EXPR$0=[SUM($0)])
+  LogicalProject($f0=[0.1:DECIMAL(19, 9)])
+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])
 ]]>
         </Resource>
     </TestCase>
@@ -3812,7 +3945,7 @@ sum(case when deptno in (3, 4) then 0 else 1 end) > 10]]>
 LogicalProject(DEPTNO=[$0])
   LogicalFilter(condition=[>(+($1, $2), 10)])
     LogicalAggregate(group=[{0}], agg#0=[SUM($1)], agg#1=[SUM($2)])
-      LogicalProject(DEPTNO=[$7], $f1=[CASE(OR(=($7, 1), =($7, 2)), 0, 1)], $f2=[CASE(OR(=($7, 3), =($7, 4)), 0, 1)])
+      LogicalProject(DEPTNO=[$7], $f1=[CASE(SEARCH($7, Sarg[1, 2]), 0, 1)], $f2=[CASE(SEARCH($7, Sarg[3, 4]), 0, 1)])
         LogicalTableScan(table=[[CATALOG, SALES, EMP]])
 ]]>
         </Resource>
@@ -4713,6 +4846,42 @@ LogicalProject(C1=[COUNT() OVER (ORDER BY $7)], C2=[COUNT() OVER (ORDER BY $7)],
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="testPivot">
+        <Resource name="sql">
+            <![CDATA[SELECT *
+FROM (SELECT mgr, deptno, job, sal FROM emp)
+PIVOT (SUM(sal) AS ss, COUNT(*)
+    FOR (job, deptno)
+    IN (('CLERK', 10) AS c10, ('MANAGER', 20) AS m20))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(MGR=[$0], C10_SS=[$1], C10=[$2], M20_SS=[$3], M20=[$4])
+  LogicalAggregate(group=[{0}], C10_SS=[SUM($3) FILTER $4], C10_null=[COUNT() FILTER $4], M20_SS=[SUM($3) FILTER $5], M20_null=[COUNT() FILTER $5])
+    LogicalProject(MGR=[$3], JOB=[$2], DEPTNO=[$7], SAL=[$5], $f4=[AND(=($2, 'CLERK'), =($7, 10))], $f5=[AND(=($2, 'MANAGER'), =($7, 20))])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testPivot2">
+        <Resource name="sql">
+            <![CDATA[SELECT *
+FROM   (SELECT deptno, job, sal
+        FROM   emp)
+PIVOT  (SUM(sal) AS sum_sal, COUNT(*) AS "COUNT"
+        FOR (job) IN ('CLERK', 'MANAGER' mgr, 'ANALYST' AS "a"))
+ORDER BY deptno]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalSort(sort0=[$0], dir0=[ASC])
+  LogicalProject(DEPTNO=[$0], 'CLERK'_SUM_SAL=[$1], 'CLERK'_COUNT=[$2], MGR_SUM_SAL=[$3], MGR_COUNT=[$4], a_SUM_SAL=[$5], a_COUNT=[$6])
+    LogicalAggregate(group=[{0}], 'CLERK'_SUM_SAL=[SUM($2) FILTER $3], 'CLERK'_COUNT=[COUNT() FILTER $3], MGR_SUM_SAL=[SUM($2) FILTER $4], MGR_COUNT=[COUNT() FILTER $4], a_SUM_SAL=[SUM($2) FILTER $5], a_COUNT=[COUNT() FILTER $5])
+      LogicalProject(DEPTNO=[$7], JOB=[$2], SAL=[$5], $f3=[=($2, 'CLERK')], $f4=[=($2, 'MANAGER')], $f5=[=($2, 'ANALYST')])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
     <TestCase name="testPushDownJoinCondition">
         <Resource name="sql">
             <![CDATA[select *
@@ -4957,7 +5126,78 @@ from table(tumble(table Shipments, descriptor(rowtime), INTERVAL '1' MINUTE))]]>
         <Resource name="plan">
             <![CDATA[
 LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
-  LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(0) window_start, TIMESTAMP(0) window_end)])
+  LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionTumbleWithParamNames">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(
+tumble(
+  DATA => table Shipments,
+  TIMECOL => descriptor(rowtime),
+  SIZE => INTERVAL '1' MINUTE))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionTumbleWithParamReordered">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(
+tumble(
+  DATA => table Shipments,
+  SIZE => INTERVAL '1' MINUTE,
+  TIMECOL => descriptor(rowtime)))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionTumbleWithInnerJoin">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(tumble(table Shipments, descriptor(rowtime), INTERVAL '1' MINUTE)) a
+join table(tumble(table Shipments, descriptor(rowtime), INTERVAL '1' MINUTE)) b
+on a.orderid = b.orderid]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3], ORDERID0=[$4], ROWTIME0=[$5], window_start0=[$6], window_end0=[$7])
+  LogicalJoin(condition=[=($0, $4)], joinType=[inner])
+    LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+      LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+        LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+    LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+      LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+        LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionTumbleWithOffset">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(tumble(table Shipments, descriptor(rowtime),
+  INTERVAL '10' MINUTE, INTERVAL '1' MINUTE))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 600000:INTERVAL MINUTE, 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
     LogicalProject(ORDERID=[$0], ROWTIME=[$1])
       LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
 ]]>
@@ -4971,7 +5211,59 @@ from table(hop(table Shipments, descriptor(rowtime), INTERVAL '1' MINUTE, INTERV
         <Resource name="plan">
             <![CDATA[
 LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
-  LogicalTableFunctionScan(invocation=[HOP(DESCRIPTOR($1), 60000:INTERVAL MINUTE, 120000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(0) window_start, TIMESTAMP(0) window_end)])
+  LogicalTableFunctionScan(invocation=[HOP(DESCRIPTOR($1), 60000:INTERVAL MINUTE, 120000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionHopWithParamNames">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(
+hop(
+  DATA => table Shipments,
+  TIMECOL => descriptor(rowtime),
+  SLIDE => INTERVAL '1' MINUTE,
+  SIZE => INTERVAL '2' MINUTE))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[HOP(DESCRIPTOR($1), 60000:INTERVAL MINUTE, 120000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionHopWithParamReordered">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(
+hop(
+  DATA => table Shipments,
+  SLIDE => INTERVAL '1' MINUTE,
+  TIMECOL => descriptor(rowtime),
+  SIZE => INTERVAL '2' MINUTE))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[HOP(DESCRIPTOR($1), 60000:INTERVAL MINUTE, 120000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionHopWithOffset">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(hop(table Shipments, descriptor(rowtime), INTERVAL '1' MINUTE, INTERVAL '5' MINUTE, INTERVAL '3' MINUTE))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[HOP(DESCRIPTOR($1), 60000:INTERVAL MINUTE, 300000:INTERVAL MINUTE, 180000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
     LogicalProject(ORDERID=[$0], ROWTIME=[$1])
       LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
 ]]>
@@ -4985,7 +5277,45 @@ from table(session(table Shipments, descriptor(rowtime), descriptor(orderId), IN
         <Resource name="plan">
             <![CDATA[
 LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
-  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($1), DESCRIPTOR($0), 600000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(0) window_start, TIMESTAMP(0) window_end)])
+  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($1), DESCRIPTOR($0), 600000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionSessionWithParamNames">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(
+session(
+  DATA => table Shipments,
+  TIMECOL => descriptor(rowtime),
+  KEY => descriptor(orderId),
+  SIZE => INTERVAL '10' MINUTE))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($1), DESCRIPTOR($0), 600000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
+    LogicalProject(ORDERID=[$0], ROWTIME=[$1])
+      LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTableFunctionSessionWithParamReordered">
+        <Resource name="sql">
+            <![CDATA[select *
+from table(
+session(
+  DATA => table Shipments,
+  KEY => descriptor(orderId),
+  TIMECOL => descriptor(rowtime),
+  SIZE => INTERVAL '10' MINUTE))]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
+  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($1), DESCRIPTOR($0), 600000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
     LogicalProject(ORDERID=[$0], ROWTIME=[$1])
       LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
 ]]>
@@ -4999,7 +5329,7 @@ from table(tumble((select * from Shipments), descriptor(rowtime), INTERVAL '1' M
         <Resource name="plan">
             <![CDATA[
 LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
-  LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(0) window_start, TIMESTAMP(0) window_end)])
+  LogicalTableFunctionScan(invocation=[TUMBLE(DESCRIPTOR($1), 60000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
     LogicalProject(ORDERID=[$0], ROWTIME=[$1])
       LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
 ]]>
@@ -5013,7 +5343,7 @@ from table(hop((select * from Shipments), descriptor(rowtime), INTERVAL '1' MINU
         <Resource name="plan">
             <![CDATA[
 LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
-  LogicalTableFunctionScan(invocation=[HOP(DESCRIPTOR($1), 60000:INTERVAL MINUTE, 120000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(0) window_start, TIMESTAMP(0) window_end)])
+  LogicalTableFunctionScan(invocation=[HOP(DESCRIPTOR($1), 60000:INTERVAL MINUTE, 120000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
     LogicalProject(ORDERID=[$0], ROWTIME=[$1])
       LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
 ]]>
@@ -5027,7 +5357,7 @@ from table(session((select * from Shipments), descriptor(rowtime), descriptor(or
         <Resource name="plan">
             <![CDATA[
 LogicalProject(ORDERID=[$0], ROWTIME=[$1], window_start=[$2], window_end=[$3])
-  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($1), DESCRIPTOR($0), 600000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(0) window_start, TIMESTAMP(0) window_end)])
+  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($1), DESCRIPTOR($0), 600000:INTERVAL MINUTE)], rowType=[RecordType(INTEGER ORDERID, TIMESTAMP(0) ROWTIME, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
     LogicalProject(ORDERID=[$0], ROWTIME=[$1])
       LogicalTableScan(table=[[CATALOG, SALES, SHIPMENTS]])
 ]]>
@@ -5041,7 +5371,7 @@ from table(session(table Orders, descriptor(rowtime), descriptor(orderId, produc
         <Resource name="plan">
             <![CDATA[
 LogicalProject(ROWTIME=[$0], PRODUCTID=[$1], ORDERID=[$2], window_start=[$3], window_end=[$4])
-  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($0), DESCRIPTOR($2, $1), 600000:INTERVAL MINUTE)], rowType=[RecordType(TIMESTAMP(0) ROWTIME, INTEGER PRODUCTID, INTEGER ORDERID, TIMESTAMP(0) window_start, TIMESTAMP(0) window_end)])
+  LogicalTableFunctionScan(invocation=[SESSION(DESCRIPTOR($0), DESCRIPTOR($2, $1), 600000:INTERVAL MINUTE)], rowType=[RecordType(TIMESTAMP(0) ROWTIME, INTEGER PRODUCTID, INTEGER ORDERID, TIMESTAMP(3) window_start, TIMESTAMP(3) window_end)])
     LogicalProject(ROWTIME=[$0], PRODUCTID=[$1], ORDERID=[$2])
       LogicalTableScan(table=[[CATALOG, SALES, ORDERS]])
 ]]>
@@ -6527,7 +6857,7 @@ group by deptno]]>
         <Resource name="plan">
             <![CDATA[
 LogicalAggregate(group=[{0}], EXPR$1=[COLLECT($1) WITHIN GROUP ([2])], EXPR$2=[COUNT()])
-  LogicalProject(DEPTNO=[$7], EMPNO=[$0], $f2=[AND(<>($0, 1), <>($0, 2))])
+  LogicalProject(DEPTNO=[$7], EMPNO=[$0], $f2=[SEARCH($0, Sarg[(-∞..1), (1..2), (2..+∞)])])
     LogicalTableScan(table=[[CATALOG, SALES, EMP]])
 ]]>
         </Resource>
@@ -6744,6 +7074,113 @@ LogicalProject(EXPR$0=[IGNORE NULLS(LEAD($5, 4))], EXPR$1=[LEAD($5, 4) OVER (ORD
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="testTrimUnionAll">
+        <Resource name="sql">
+            <![CDATA[select deptno from
+(select ename, deptno from emp
+union all
+select name, deptno from dept)]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalUnion(all=[true])
+  LogicalProject(DEPTNO=[$7])
+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+  LogicalProject(DEPTNO=[$0])
+    LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTrimUnionDistinct">
+        <Resource name="sql">
+            <![CDATA[select deptno from
+(select ename, deptno from emp
+union
+select name, deptno from dept)]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DEPTNO=[$1])
+  LogicalUnion(all=[false])
+    LogicalProject(ENAME=[$1], DEPTNO=[$7])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+    LogicalProject(NAME=[$1], DEPTNO=[$0])
+      LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTrimIntersectAll">
+        <Resource name="sql">
+            <![CDATA[select deptno from
+(select ename, deptno from emp
+intersect all
+select name, deptno from dept)]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DEPTNO=[$1])
+  LogicalIntersect(all=[true])
+    LogicalProject(ENAME=[$1], DEPTNO=[$7])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+    LogicalProject(NAME=[$1], DEPTNO=[$0])
+      LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTrimIntersectDistinct">
+        <Resource name="sql">
+            <![CDATA[select deptno from
+(select ename, deptno from emp
+intersect
+select name, deptno from dept)]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DEPTNO=[$1])
+  LogicalIntersect(all=[false])
+    LogicalProject(ENAME=[$1], DEPTNO=[$7])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+    LogicalProject(NAME=[$1], DEPTNO=[$0])
+      LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTrimExceptAll">
+        <Resource name="sql">
+            <![CDATA[select deptno from
+(select ename, deptno from emp
+except all
+select name, deptno from dept)]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DEPTNO=[$1])
+  LogicalMinus(all=[true])
+    LogicalProject(ENAME=[$1], DEPTNO=[$7])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+    LogicalProject(NAME=[$1], DEPTNO=[$0])
+      LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testTrimExceptDistinct">
+        <Resource name="sql">
+            <![CDATA[select deptno from
+(select ename, deptno from emp
+except
+select name, deptno from dept)]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DEPTNO=[$1])
+  LogicalMinus(all=[false])
+    LogicalProject(ENAME=[$1], DEPTNO=[$7])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+    LogicalProject(NAME=[$1], DEPTNO=[$0])
+      LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+]]>
+        </Resource>
+    </TestCase>
     <TestCase name="testAggregateWithSameDigestInSubQueries">
         <Resource name="sql">
             <![CDATA[select
@@ -6757,7 +7194,7 @@ GROUP by deptno, job]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
-LogicalProject(JOB_NAME=[CASE(OR(=($1, '810000'), =($1, '820000')), $1, 'error':VARCHAR(10))], EXPR$1=[$2])
+LogicalProject(JOB_NAME=[CASE(SEARCH($1, Sarg['810000', '820000']:CHAR(6)), $1, 'error':VARCHAR(10))], EXPR$1=[$2])
   LogicalAggregate(group=[{0, 1}], EXPR$1=[COUNT()])
     LogicalProject(DEPTNO=[$7], JOB=[$2], EMPNO=[$0])
       LogicalFilter(condition=[OR(<>($2, ''), =($2, '810000'), =($2, '820000'))])
@@ -6790,6 +7227,121 @@ LogicalProject(EMPNO=[$0], DEPTNO=[$1], DEPTNO0=[$3], NAME=[$4])
             <![CDATA[
 LogicalProject(EXPR$0=[CASE(IS NOT NULL($3), CAST($3):INTEGER NOT NULL, 0)])
   LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testUdfWithStructuredReturnType">
+        <Resource name="sql">
+            <![CDATA[SELECT deptno, tmp.r.f0, tmp.r.f1 FROM
+(SELECT deptno, STRUCTURED_FUNC() AS r from dept)tmp]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(DEPTNO=[$0], F0=[STRUCTURED_FUNC().F0], F1=[STRUCTURED_FUNC().F1])
+  LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testGroupByCoalesceIn">
+        <Resource name="sql">
+            <![CDATA[select case when coalesce(ename, 'a') in ('1', '2')
+then 'CKA' else 'QT' END, count(distinct deptno) from emp
+group by case when coalesce(ename, 'a') in ('1', '2') then 'CKA' else 'QT' END]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalAggregate(group=[{0}], EXPR$1=[COUNT(DISTINCT $1)])
+  LogicalProject(EXPR$0=[CASE(SEARCH($1, Sarg['1', '2']:CHAR(1)), 'CKA', 'QT ')], DEPTNO=[$7])
+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testSortInSubQuery">
+        <Resource name="sql">
+            <![CDATA[select * from (select empno from emp order by empno)]]>
+        </Resource>
+        <Resource name="planRemoveSort">
+            <![CDATA[
+LogicalProject(EMPNO=[$0])
+  LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+        <Resource name="planKeepSort">
+            <![CDATA[
+LogicalProject(EMPNO=[$0])
+  LogicalSort(sort0=[$0], dir0=[ASC])
+    LogicalProject(EMPNO=[$0])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+
+        </Resource>
+    </TestCase>
+    <TestCase name="testJoinExpandAndDecorrelation">
+        <Resource name="plan_extended">
+            <![CDATA[
+LogicalProject(DEPTNO=[$9], SAL=[$7])
+  LogicalJoin(condition=[AND(=($9, $0), <($7, $0))], joinType=[inner])
+    LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+    LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8], EXPR$0=[$10])
+      LogicalJoin(condition=[=($0, $9)], joinType=[left])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+        LogicalAggregate(group=[{0}], EXPR$0=[AVG($1)])
+          LogicalProject(DEPTNO=[$7], SAL=[$5])
+            LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+        <Resource name="plan_not_extended">
+            <![CDATA[
+LogicalProject(DEPTNO=[$9], SAL=[$7])
+  LogicalJoin(condition=[AND(=($9, $0), <($7, $SCALAR_QUERY({
+LogicalAggregate(group=[{}], EXPR$0=[AVG($0)])
+  LogicalProject(SAL=[$5])
+    LogicalFilter(condition=[=($7, $cor0.DEPTNO)])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+})))], joinType=[inner])
+    LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testImplicitJoinExpandAndDecorrelation">
+        <Resource name="plan_extended">
+            <![CDATA[
+LogicalProject(DEPTNO=[$9], SAL=[$7])
+  LogicalProject(DEPTNO=[$0], NAME=[$1], EMPNO=[$2], ENAME=[$3], JOB=[$4], MGR=[$5], HIREDATE=[$6], SAL=[$7], COMM=[$8], DEPTNO0=[$9], SLACKER=[$10], DEPTNO1=[CAST($11):INTEGER], EXPR$0=[CAST($12):INTEGER])
+    LogicalJoin(condition=[AND(=($0, $11), <($7, $12))], joinType=[inner])
+      LogicalJoin(condition=[=($9, $0)], joinType=[inner])
+        LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+        LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+      LogicalAggregate(group=[{0}], EXPR$0=[AVG($1)])
+        LogicalProject(DEPTNO=[$7], SAL=[$5])
+          LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+        <Resource name="plan_not_extended">
+            <![CDATA[
+LogicalProject(DEPTNO=[$9], SAL=[$7])
+  LogicalFilter(condition=[AND(=($9, $0), <($7, $SCALAR_QUERY({
+LogicalAggregate(group=[{}], EXPR$0=[AVG($0)])
+  LogicalProject(SAL=[$5])
+    LogicalFilter(condition=[=($7, $cor0.DEPTNO)])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+})))], variablesSet=[[$cor0]])
+    LogicalJoin(condition=[true], joinType=[inner])
+      LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
+      LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testCompositeOfCountRange">
+        <Resource name="sql">
+            <![CDATA[select COMPOSITE(deptno)
+from dept]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(EXPR$0=[COMPOSITE($0)])
+  LogicalTableScan(table=[[CATALOG, SALES, DEPT]])
 ]]>
         </Resource>
     </TestCase>

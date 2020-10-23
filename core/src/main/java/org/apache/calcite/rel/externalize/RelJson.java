@@ -200,11 +200,7 @@ public class RelJson {
 
     ImmutableIntList list = EMPTY;
     if (map.containsKey("keys")) {
-      List<Object> keysJson = (List<Object>) map.get("keys");
-      ArrayList<Integer> keys = new ArrayList<>(keysJson.size());
-      for (Object o : keysJson) {
-        keys.add((Integer) o);
-      }
+      List<Integer> keys = (List<Integer>) map.get("keys");
       list = ImmutableIntList.copyOf(keys);
     }
     return RelDistributions.of(type, list);
@@ -213,13 +209,8 @@ public class RelJson {
   private Object toJson(RelDistribution relDistribution) {
     final Map<String, Object> map = jsonBuilder.map();
     map.put("type", relDistribution.getType().name());
-
     if (!relDistribution.getKeys().isEmpty()) {
-      List<Object> keys = new ArrayList<>(relDistribution.getKeys().size());
-      for (Integer key : relDistribution.getKeys()) {
-        keys.add(toJson(key));
-      }
-      map.put("keys", keys);
+      map.put("keys", relDistribution.getKeys());
     }
     return map;
   }
@@ -252,7 +243,9 @@ public class RelJson {
               new SqlIntervalQualifier(startUnit, endUnit, SqlParserPos.ZERO));
         }
         final RelDataType type;
-        if (precision == null) {
+        if (sqlTypeName == SqlTypeName.ARRAY) {
+          type = typeFactory.createArrayType(typeFactory.createSqlType(SqlTypeName.ANY), -1);
+        } else if (precision == null) {
           type = typeFactory.createSqlType(sqlTypeName);
         } else if (scale == null) {
           type = typeFactory.createSqlType(sqlTypeName, precision);
@@ -271,7 +264,11 @@ public class RelJson {
 
   public Object toJson(AggregateCall node) {
     final Map<String, Object> map = jsonBuilder.map();
-    map.put("agg", toJson(node.getAggregation()));
+    final Map<String, Object> aggMap = toJson(node.getAggregation());
+    if (node.getAggregation().getFunctionType().isUserDefined()) {
+      aggMap.put("class", node.getAggregation().getClass().getName());
+    }
+    map.put("agg", aggMap);
     map.put("type", toJson(node.getType()));
     map.put("distinct", node.isDistinct());
     map.put("operands", node.getArgList());
@@ -405,6 +402,9 @@ public class RelJson {
         switch (node.getKind()) {
         case CAST:
           map.put("type", toJson(node.getType()));
+          break;
+        default:
+          break;
         }
         if (call.getOperator() instanceof SqlFunction) {
           if (((SqlFunction) call.getOperator()).getFunctionType().isUserDefined()) {
@@ -633,7 +633,6 @@ public class RelJson {
     }
 
     final String type = (String) map.get("type");
-    final RexBuilder rexBuilder = input.getCluster().getRexBuilder();
     switch (type) {
     case "CURRENT_ROW":
       return RexWindowBounds.CURRENT_ROW;

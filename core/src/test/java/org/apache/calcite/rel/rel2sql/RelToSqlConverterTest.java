@@ -28,10 +28,10 @@ import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.rules.AggregateJoinTransposeRule;
 import org.apache.calcite.rel.rules.AggregateProjectMergeRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.FilterJoinRule;
 import org.apache.calcite.rel.rules.ProjectToWindowRule;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
-import org.apache.calcite.rel.rules.UnionMergeRule;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeSystem;
@@ -58,6 +58,7 @@ import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.type.SqlTypeFactoryImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.util.SqlShuttle;
+import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.test.CalciteAssert;
 import org.apache.calcite.test.MockSqlOperatorTable;
@@ -97,15 +98,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RelToSqlConverterTest {
   static final SqlToRelConverter.Config DEFAULT_REL_CONFIG =
-      SqlToRelConverter.configBuilder()
-          .withTrimUnusedFields(false)
-          .build();
+      SqlToRelConverter.config()
+          .withTrimUnusedFields(false);
 
   static final SqlToRelConverter.Config NO_EXPAND_CONFIG =
-      SqlToRelConverter.configBuilder()
+      SqlToRelConverter.config()
           .withTrimUnusedFields(false)
-          .withExpand(false)
-          .build();
+          .withExpand(false);
 
   /** Initiates a test case with a given SQL query. */
   private Sql sql(String sql) {
@@ -177,6 +176,8 @@ class RelToSqlConverterTest {
             SqlDialect.DatabaseProduct.ORACLE)
         .put(SqlDialect.DatabaseProduct.POSTGRESQL.getDialect(),
             SqlDialect.DatabaseProduct.POSTGRESQL)
+        .put(DatabaseProduct.PRESTO.getDialect(),
+            DatabaseProduct.PRESTO)
         .build();
   }
 
@@ -193,13 +194,73 @@ class RelToSqlConverterTest {
   /** Converts a relational expression to SQL in a given dialect. */
   private static String toSql(RelNode root, SqlDialect dialect) {
     final RelToSqlConverter converter = new RelToSqlConverter(dialect);
-    final SqlNode sqlNode = converter.visitChild(0, root).asStatement();
+    final SqlNode sqlNode = converter.visitRoot(root).asStatement();
     return sqlNode.toSqlString(dialect).getSql();
   }
 
   @Test void testSimpleSelectStarFromProductTable() {
     String query = "select * from \"product\"";
     sql(query).ok("SELECT *\nFROM \"foodmart\".\"product\"");
+  }
+
+  @Test void testAggregateFilterWhereToSqlFromProductTable() {
+    String query = "select\n"
+        + "  sum(\"shelf_width\") filter (where \"net_weight\" > 0),\n"
+        + "  sum(\"shelf_width\")\n"
+        + "from \"foodmart\".\"product\"\n"
+        + "where \"product_id\" > 0\n"
+        + "group by \"product_id\"";
+    final String expected = "SELECT"
+        + " SUM(\"shelf_width\") FILTER (WHERE \"net_weight\" > 0 IS TRUE),"
+        + " SUM(\"shelf_width\")\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "WHERE \"product_id\" > 0\n"
+        + "GROUP BY \"product_id\"";
+    sql(query).ok(expected);
+  }
+
+  @Test void testAggregateFilterWhereToBigQuerySqlFromProductTable() {
+    String query = "select\n"
+        + "  sum(\"shelf_width\") filter (where \"net_weight\" > 0),\n"
+        + "  sum(\"shelf_width\")\n"
+        + "from \"foodmart\".\"product\"\n"
+        + "where \"product_id\" > 0\n"
+        + "group by \"product_id\"";
+    final String expected = "SELECT SUM(CASE WHEN net_weight > 0 IS TRUE"
+        + " THEN shelf_width ELSE NULL END), "
+        + "SUM(shelf_width)\n"
+        + "FROM foodmart.product\n"
+        + "WHERE product_id > 0\n"
+        + "GROUP BY product_id";
+    sql(query).withBigQuery().ok(expected);
+  }
+
+  @Test void testPivotToSqlFromProductTable() {
+    String query = "select * from (\n"
+        + "  select \"shelf_width\", \"net_weight\", \"product_id\"\n"
+        + "  from \"foodmart\".\"product\")\n"
+        + "  pivot (sum(\"shelf_width\") as w, count(*) as c\n"
+        + "    for (\"product_id\") in (10, 20))";
+    final String expected = "SELECT \"net_weight\","
+        + " SUM(\"shelf_width\") FILTER (WHERE \"product_id\" = 10) AS \"10_W\","
+        + " COUNT(*) FILTER (WHERE \"product_id\" = 10) AS \"10_C\","
+        + " SUM(\"shelf_width\") FILTER (WHERE \"product_id\" = 20) AS \"20_W\","
+        + " COUNT(*) FILTER (WHERE \"product_id\" = 20) AS \"20_C\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY \"net_weight\"";
+    // BigQuery does not support FILTER, so we generate CASE around the
+    // arguments to the aggregate functions.
+    final String expectedBigQuery = "SELECT net_weight,"
+        + " SUM(CASE WHEN product_id = 10 "
+        + "THEN shelf_width ELSE NULL END) AS `10_W`,"
+        + " COUNT(CASE WHEN product_id = 10 THEN 1 ELSE NULL END) AS `10_C`,"
+        + " SUM(CASE WHEN product_id = 20 "
+        + "THEN shelf_width ELSE NULL END) AS `20_W`,"
+        + " COUNT(CASE WHEN product_id = 20 THEN 1 ELSE NULL END) AS `20_C`\n"
+        + "FROM foodmart.product\n"
+        + "GROUP BY net_weight";
+    sql(query).ok(expected)
+        .withBigQuery().ok(expectedBigQuery);
   }
 
   @Test void testSimpleSelectQueryFromProductTable() {
@@ -215,6 +276,16 @@ class RelToSqlConverterTest {
     final String expected = "SELECT \"product_id\", \"shelf_width\"\n"
         + "FROM \"foodmart\".\"product\"\n"
         + "WHERE \"product_id\" < 10";
+    sql(query).ok(expected);
+  }
+
+  @Test void testSelectWhereNotEqualsOrNull() {
+    String query = "select \"product_id\", \"shelf_width\"\n"
+        + "from \"product\"\n"
+        + "where \"net_weight\" <> 10 or \"net_weight\" is null";
+    final String expected = "SELECT \"product_id\", \"shelf_width\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "WHERE \"net_weight\" <> 10 OR \"net_weight\" IS NULL";
     sql(query).ok(expected);
   }
 
@@ -267,14 +338,20 @@ class RelToSqlConverterTest {
         + "FROM \"foodmart\".\"product\"";
     final String expectedMySql = "SELECT COUNT(*)\n"
         + "FROM `foodmart`.`product`";
+    final String expectedPresto = "SELECT COUNT(*)\n"
+        + "FROM \"foodmart\".\"product\"";
     sql(sql0)
         .ok(expected)
         .withMysql()
-        .ok(expectedMySql);
+        .ok(expectedMySql)
+        .withPresto()
+        .ok(expectedPresto);
     sql(sql1)
         .ok(expected)
         .withMysql()
-        .ok(expectedMySql);
+        .ok(expectedMySql)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
   @Test void testSelectQueryWithGroupByEmpty2() {
@@ -285,10 +362,15 @@ class RelToSqlConverterTest {
     final String expectedMySql = "SELECT 42 AS `C`\n"
         + "FROM `foodmart`.`product`\n"
         + "GROUP BY ()";
+    final String expectedPresto = "SELECT 42 AS \"C\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY ()";
     sql(query)
         .ok(expected)
         .withMysql()
-        .ok(expectedMySql);
+        .ok(expectedMySql)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
   /** Test case for
@@ -420,10 +502,17 @@ class RelToSqlConverterTest {
         + "GROUP BY `product_class_id` WITH ROLLUP\n"
         + "ORDER BY `product_class_id` IS NULL, `product_class_id`,"
         + " COUNT(*) IS NULL, COUNT(*)";
+    final String expectedPresto = "SELECT \"product_class_id\", COUNT(*) AS \"C\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY ROLLUP(\"product_class_id\")\n"
+        + "ORDER BY \"product_class_id\" IS NULL, \"product_class_id\", "
+        + "COUNT(*) IS NULL, COUNT(*)";
     sql(query)
         .ok(expected)
         .withMysql()
-        .ok(expectedMySql);
+        .ok(expectedMySql)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
   /** As {@link #testSelectQueryWithSingletonCube()}, but no ORDER BY
@@ -438,10 +527,15 @@ class RelToSqlConverterTest {
     final String expectedMySql = "SELECT `product_class_id`, COUNT(*) AS `C`\n"
         + "FROM `foodmart`.`product`\n"
         + "GROUP BY `product_class_id` WITH ROLLUP";
+    final String expectedPresto = "SELECT \"product_class_id\", COUNT(*) AS \"C\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY ROLLUP(\"product_class_id\")";
     sql(query)
         .ok(expected)
         .withMysql()
-        .ok(expectedMySql);
+        .ok(expectedMySql)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
   /** Cannot rewrite if ORDER BY contains a column not in GROUP BY (in this
@@ -486,10 +580,16 @@ class RelToSqlConverterTest {
         + "FROM `foodmart`.`product`\n"
         + "GROUP BY `product_class_id` WITH ROLLUP\n"
         + "LIMIT 5";
+    final String expectedPresto = "SELECT \"product_class_id\", COUNT(*) AS \"C\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY ROLLUP(\"product_class_id\")\n"
+        + "LIMIT 5";
     sql(query)
         .ok(expected)
         .withMysql()
-        .ok(expectedMySql);
+        .ok(expectedMySql)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
   @Test void testSelectQueryWithMinAggregateFunction() {
@@ -648,8 +748,8 @@ class RelToSqlConverterTest {
         .build();
     final SqlDialect dialect = SqlDialect.DatabaseProduct.CALCITE.getDialect();
     final RelNode root = relFn.apply(relBuilder());
-    final SqlNode sqlNode = new RelToSqlConverter(dialect)
-        .visitChild(0, root).asStatement();
+    final RelToSqlConverter converter = new RelToSqlConverter(dialect);
+    final SqlNode sqlNode = converter.visitRoot(root).asStatement();
     final String sqlString = sqlNode.accept(new SqlShuttle())
         .toSqlString(dialect).getSql();
     assertThat(sqlString, notNullValue());
@@ -786,8 +886,7 @@ class RelToSqlConverterTest {
         .build();
     final String expected = "SELECT *\n"
         + "FROM \"scott\".\"EMP\"\n"
-        + "WHERE (\"EMPNO\" = 0 OR \"EMPNO\" = 1 OR (\"EMPNO\" = 2 OR \"EMPNO\" = 3))"
-        + " AND (\"DEPTNO\" = 5 OR (\"DEPTNO\" = 6 OR \"DEPTNO\" = 7))";
+        + "WHERE \"EMPNO\" IN (0, 1, 2, 3) AND \"DEPTNO\" IN (5, 6, 7)";
     relFn(relFn).ok(expected);
   }
 
@@ -1007,13 +1106,80 @@ class RelToSqlConverterTest {
         builder.push(filter)
             .project(builder.alias(builder.field("D"), "emps.deptno"))
             .build();
-    final String sql = toSql(root, DatabaseProduct.MYSQL.getDialect());
-    final String expectedSql = "SELECT `D2` AS `emps.deptno`\n"
+    final String expectedMysql = "SELECT `D2` AS `emps.deptno`\n"
         + "FROM (SELECT `DEPTNO` AS `D2`, COUNT(*) AS `emps.count`\n"
         + "FROM `scott`.`EMP`\n"
         + "GROUP BY `DEPTNO`\n"
-        + "HAVING COUNT(*) < 2) AS `t1`";
-    assertThat(sql, isLinux(expectedSql));
+        + "HAVING `emps.count` < 2) AS `t1`";
+    final String expectedPostgresql = "SELECT \"DEPTNO\" AS \"emps.deptno\"\n"
+        + "FROM \"scott\".\"EMP\"\n"
+        + "GROUP BY \"DEPTNO\"\n"
+        + "HAVING COUNT(*) < 2";
+    final String expectedBigQuery = "SELECT D2 AS `emps.deptno`\n"
+        + "FROM (SELECT DEPTNO AS D2, COUNT(*) AS `emps.count`\n"
+        + "FROM scott.EMP\n"
+        + "GROUP BY DEPTNO\n"
+        + "HAVING `emps.count` < 2) AS t1";
+    relFn(b -> root)
+        .withMysql().ok(expectedMysql)
+        .withPostgresql().ok(expectedPostgresql)
+        .withBigQuery().ok(expectedBigQuery);
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-3896">[CALCITE-3896]
+   * JDBC adapter, when generating SQL, changes target of ambiguous HAVING
+   * clause with a Project on Filter on Aggregate</a>.
+   *
+   * <p>The alias is ambiguous in dialects such as MySQL and BigQuery that
+   * have {@link SqlConformance#isHavingAlias()} = true. When the HAVING clause
+   * tries to reference a column, it sees the alias instead. */
+  @Test void testHavingAliasSameAsColumnIgnoringCase() {
+    checkHavingAliasSameAsColumn(true);
+  }
+
+  @Test void testHavingAliasSameAsColumn() {
+    checkHavingAliasSameAsColumn(false);
+  }
+
+  private void checkHavingAliasSameAsColumn(boolean upperAlias) {
+    final String alias = upperAlias ? "GROSS_WEIGHT" : "gross_weight";
+    final String query = "select \"product_id\" + 1,\n"
+        + "  sum(\"gross_weight\") as \"" + alias + "\"\n"
+        + "from \"product\"\n"
+        + "group by \"product_id\"\n"
+        + "having sum(\"product\".\"gross_weight\") < 200";
+    // PostgreSQL has isHavingAlias=false, case-sensitive=true
+    final String expectedPostgresql = "SELECT \"product_id\" + 1,"
+        + " SUM(\"gross_weight\") AS \"" + alias + "\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY \"product_id\"\n"
+        + "HAVING SUM(\"gross_weight\") < 200";
+    // MySQL has isHavingAlias=true, case-sensitive=true
+    final String expectedMysql = "SELECT `product_id` + 1, `" + alias + "`\n"
+        + "FROM (SELECT `product_id`, SUM(`gross_weight`) AS `" + alias + "`\n"
+        + "FROM `foodmart`.`product`\n"
+        + "GROUP BY `product_id`\n"
+        + "HAVING `" + alias + "` < 200) AS `t1`";
+    // BigQuery has isHavingAlias=true, case-sensitive=false
+    final String expectedBigQuery = upperAlias
+        ? "SELECT product_id + 1, GROSS_WEIGHT\n"
+            + "FROM (SELECT product_id, SUM(gross_weight) AS GROSS_WEIGHT\n"
+            + "FROM foodmart.product\n"
+            + "GROUP BY product_id\n"
+            + "HAVING GROSS_WEIGHT < 200) AS t1"
+        // Before [CALCITE-3896] was fixed, we got
+        // "HAVING SUM(gross_weight) < 200) AS t1"
+        // which on BigQuery gives you an error about aggregating aggregates
+        : "SELECT product_id + 1, gross_weight\n"
+            + "FROM (SELECT product_id, SUM(gross_weight) AS gross_weight\n"
+            + "FROM foodmart.product\n"
+            + "GROUP BY product_id\n"
+            + "HAVING gross_weight < 200) AS t1";
+    sql(query)
+        .withPostgresql().ok(expectedPostgresql)
+        .withMysql().ok(expectedMysql)
+        .withBigQuery().ok(expectedBigQuery);
   }
 
   @Test void testHaving4() {
@@ -1231,8 +1397,7 @@ class RelToSqlConverterTest {
 
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-3663">[CALCITE-3663]
-   * Support for TRIM function in Bigquery dialect</a>. */
-
+   * Support for TRIM function in BigQuery dialect</a>. */
   @Test void testBqTrimWithLeadingChar() {
     final String query = "SELECT TRIM(LEADING 'a' from 'abcd')\n"
         + "from \"foodmart\".\"reserve_employee\"";
@@ -1348,22 +1513,18 @@ class RelToSqlConverterTest {
   @Test void testUnparseIn1() {
     final Function<RelBuilder, RelNode> relFn = b ->
         b.scan("EMP")
-            .filter(
-                b.call(SqlStdOperatorTable.IN, b.field("DEPTNO"),
-                    b.literal(21)))
+            .filter(b.in(b.field("DEPTNO"), b.literal(21)))
             .build();
     final String expectedSql = "SELECT *\n"
         + "FROM \"scott\".\"EMP\"\n"
-        + "WHERE \"DEPTNO\" IN (21)";
+        + "WHERE \"DEPTNO\" = 21";
     relFn(relFn).ok(expectedSql);
   }
 
   @Test void testUnparseIn2() {
     final Function<RelBuilder, RelNode> relFn = b -> b
         .scan("EMP")
-        .filter(
-            b.call(SqlStdOperatorTable.IN, b.field("DEPTNO"),
-                b.literal(20), b.literal(21)))
+        .filter(b.in(b.field("DEPTNO"), b.literal(20), b.literal(21)))
         .build();
     final String expectedSql = "SELECT *\n"
         + "FROM \"scott\".\"EMP\"\n"
@@ -1375,7 +1536,7 @@ class RelToSqlConverterTest {
     final Function<RelBuilder, RelNode> relFn = b ->
         b.scan("EMP")
             .filter(
-                b.call(SqlStdOperatorTable.IN,
+                b.in(
                     b.call(SqlStdOperatorTable.ROW,
                         b.field("DEPTNO"), b.field("JOB")),
                     b.call(SqlStdOperatorTable.ROW, b.literal(1),
@@ -1383,7 +1544,7 @@ class RelToSqlConverterTest {
             .build();
     final String expectedSql = "SELECT *\n"
         + "FROM \"scott\".\"EMP\"\n"
-        + "WHERE ROW(\"DEPTNO\", \"JOB\") IN (ROW(1, 'PRESIDENT'))";
+        + "WHERE ROW(\"DEPTNO\", \"JOB\") = ROW(1, 'PRESIDENT')";
     relFn(relFn).ok(expectedSql);
   }
 
@@ -1391,11 +1552,11 @@ class RelToSqlConverterTest {
     final Function<RelBuilder, RelNode> relFn = b ->
         b.scan("EMP")
             .filter(
-                b.call(SqlStdOperatorTable.IN,
+                b.in(
                     b.call(SqlStdOperatorTable.ROW,
                         b.field("DEPTNO"), b.field("JOB")),
                     b.call(SqlStdOperatorTable.ROW, b.literal(1),
-                b.literal("PRESIDENT")),
+                        b.literal("PRESIDENT")),
                     b.call(SqlStdOperatorTable.ROW, b.literal(2),
                         b.literal("PRESIDENT"))))
             .build();
@@ -2090,6 +2251,15 @@ class RelToSqlConverterTest {
         .ok(expected)
         .withClickHouse()
         .ok(expectedClickHouse);
+
+    final String expectedPresto = "SELECT \"product_id\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "OFFSET 10\n"
+        + "LIMIT 100";
+    sql(query)
+        .ok(expected)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
   @Test void testSelectQueryWithLimitOffsetClause() {
@@ -2321,6 +2491,30 @@ class RelToSqlConverterTest {
     assertThat(s, notNullValue()); // sufficient that conversion did not throw
   }
 
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-4249">[CALCITE-4249]
+   * JDBC adapter cannot translate NOT LIKE in join condition</a>. */
+  @Test void testJoinOnNotLike() {
+    final Function<RelBuilder, RelNode> relFn = b ->
+        b.scan("EMP")
+            .scan("DEPT")
+            .join(JoinRelType.LEFT,
+                b.and(
+                    b.equals(b.field(2, 0, "DEPTNO"),
+                        b.field(2, 1, "DEPTNO")),
+                    b.not(
+                        b.call(SqlStdOperatorTable.LIKE,
+                            b.field(2, 1, "DNAME"),
+                            b.literal("ACCOUNTING")))))
+            .build();
+    final String expectedSql = "SELECT *\n"
+        + "FROM \"scott\".\"EMP\"\n"
+        + "LEFT JOIN \"scott\".\"DEPT\" "
+        + "ON \"EMP\".\"DEPTNO\" = \"DEPT\".\"DEPTNO\" "
+        + "AND \"DEPT\".\"DNAME\" NOT LIKE 'ACCOUNTING'";
+    relFn(relFn).ok(expectedSql);
+  }
+
   @Test void testCartesianProductWithInnerJoinSyntax() {
     String query = "select * from \"department\"\n"
         + "INNER JOIN \"employee\" ON TRUE";
@@ -2336,6 +2530,21 @@ class RelToSqlConverterTest {
     String expected = "SELECT *\n"
         + "FROM \"foodmart\".\"department\"\n"
         + "FULL JOIN \"foodmart\".\"employee\" ON TRUE";
+    sql(query).ok(expected);
+  }
+
+  @Test void testCaseOnSubQuery() {
+    String query = "SELECT CASE WHEN v.g IN (0, 1) THEN 0 ELSE 1 END\n"
+        + "FROM (SELECT * FROM \"foodmart\".\"customer\") AS c,\n"
+        + "  (SELECT 0 AS g) AS v\n"
+        + "GROUP BY v.g";
+    final String expected = "SELECT"
+        + " CASE WHEN \"t1\".\"G\" IN (0, 1) THEN 0 ELSE 1 END\n"
+        + "FROM (SELECT *\n"
+        + "FROM \"foodmart\".\"customer\") AS \"t\",\n"
+        + "(SELECT 0 AS \"G\"\n"
+        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")) AS \"t1\"\n"
+        + "GROUP BY \"t1\".\"G\"";
     sql(query).ok(expected);
   }
 
@@ -2474,6 +2683,57 @@ class RelToSqlConverterTest {
     sql(query).withDb2().ok(expected);
   }
 
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-4090">[CALCITE-4090]
+   * DB2 aliasing breaks with a complex SELECT above a sub-query</a>. */
+  @Test void testDb2SubQueryAlias() {
+    String query = "select count(foo), \"units_per_case\"\n"
+        + "from (select \"units_per_case\", \"cases_per_pallet\",\n"
+        + "      \"product_id\", 1 as foo\n"
+        + "  from \"product\")\n"
+        + "where \"cases_per_pallet\" > 100\n"
+        + "group by \"product_id\", \"units_per_case\"\n"
+        + "order by \"units_per_case\" desc";
+    final String expected = "SELECT COUNT(*), t.units_per_case\n"
+        + "FROM (SELECT product.units_per_case, product.cases_per_pallet, "
+        + "product.product_id, 1 AS FOO\n"
+        + "FROM foodmart.product AS product) AS t\n"
+        + "WHERE t.cases_per_pallet > 100\n"
+        + "GROUP BY t.product_id, t.units_per_case\n"
+        + "ORDER BY t.units_per_case DESC";
+    sql(query).withDb2().ok(expected);
+  }
+
+  @Test void testDb2SubQueryFromUnion() {
+    String query = "select count(foo), \"units_per_case\"\n"
+        + "from (select \"units_per_case\", \"cases_per_pallet\",\n"
+        + "      \"product_id\", 1 as foo\n"
+        + "  from \"product\"\n"
+        + "  where \"cases_per_pallet\" > 100\n"
+        + "  union all\n"
+        + "  select \"units_per_case\", \"cases_per_pallet\",\n"
+        + "      \"product_id\", 1 as foo\n"
+        + "  from \"product\"\n"
+        + "  where \"cases_per_pallet\" < 100)\n"
+        + "where \"cases_per_pallet\" > 100\n"
+        + "group by \"product_id\", \"units_per_case\"\n"
+        + "order by \"units_per_case\" desc";
+    final String expected = "SELECT COUNT(*), t3.units_per_case\n"
+        + "FROM (SELECT product.units_per_case, product.cases_per_pallet, "
+        + "product.product_id, 1 AS FOO\n"
+        + "FROM foodmart.product AS product\n"
+        + "WHERE product.cases_per_pallet > 100\n"
+        + "UNION ALL\n"
+        + "SELECT product0.units_per_case, product0.cases_per_pallet, "
+        + "product0.product_id, 1 AS FOO\n"
+        + "FROM foodmart.product AS product0\n"
+        + "WHERE product0.cases_per_pallet < 100) AS t3\n"
+        + "WHERE t3.cases_per_pallet > 100\n"
+        + "GROUP BY t3.product_id, t3.units_per_case\n"
+        + "ORDER BY t3.units_per_case DESC";
+    sql(query).withDb2().ok(expected);
+  }
+
   @Test void testDb2DialectSelectQueryWithGroup() {
     String query = "select count(*), sum(\"employee_id\") "
         + "from \"reserve_employee\" "
@@ -2569,7 +2829,7 @@ class RelToSqlConverterTest {
         + "SELECT \"product_class_id\" AS \"PRODUCT_ID\"\n"
         + "FROM \"foodmart\".\"product_class\"";
 
-    final RuleSet rules = RuleSets.ofList(UnionMergeRule.INSTANCE);
+    final RuleSet rules = RuleSets.ofList(CoreRules.UNION_MERGE);
     sql(query)
         .optimize(rules, null)
         .ok(expected);
@@ -2665,8 +2925,8 @@ class RelToSqlConverterTest {
 
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-2625">[CALCITE-2625]
-   * Removing Window Boundaries from SqlWindow of Aggregate Function which do not allow Framing</a>
-   * */
+   * Removing Window Boundaries from SqlWindow of Aggregate Function which do
+   * not allow Framing</a>. */
   @Test void testRowNumberFunctionForPrintingOfFrameBoundary() {
     String query = "SELECT row_number() over (order by \"hire_date\") FROM \"employee\"";
     String expected = "SELECT ROW_NUMBER() OVER (ORDER BY \"hire_date\")\n"
@@ -2748,7 +3008,7 @@ class RelToSqlConverterTest {
     HepProgramBuilder builder = new HepProgramBuilder();
     builder.addRuleClass(ProjectToWindowRule.class);
     HepPlanner hepPlanner = new HepPlanner(builder.build());
-    RuleSet rules = RuleSets.ofList(ProjectToWindowRule.PROJECT);
+    RuleSet rules = RuleSets.ofList(CoreRules.PROJECT_TO_LOGICAL_PROJECT_AND_WINDOW);
 
     sql(query0).optimize(rules, hepPlanner).ok(expected0);
     sql(query1).optimize(rules, hepPlanner).ok(expected1);
@@ -2764,7 +3024,7 @@ class RelToSqlConverterTest {
    * <a href="https://issues.apache.org/jira/browse/CALCITE-3866">[CALCITE-3866]
    * "numeric field overflow" when running the generated SQL in PostgreSQL </a>.
    */
-  @Test public void testSumReturnType() {
+  @Test void testSumReturnType() {
     String query =
         "select sum(e1.\"store_sales\"), sum(e2.\"store_sales\") from \"sales_fact_dec_1998\" as "
             + "e1 , \"sales_fact_dec_1998\" as e2 where e1.\"product_id\" = e2.\"product_id\"";
@@ -2784,13 +3044,14 @@ class RelToSqlConverterTest {
     builder.addRuleClass(AggregateProjectMergeRule.class);
     builder.addRuleClass(AggregateJoinTransposeRule.class);
     HepPlanner hepPlanner = new HepPlanner(builder.build());
-    RuleSet rules = RuleSets.ofList(FilterJoinRule.FILTER_ON_JOIN, FilterJoinRule.JOIN,
-        AggregateProjectMergeRule.INSTANCE,
-        AggregateJoinTransposeRule.EXTENDED);
+    RuleSet rules = RuleSets.ofList(
+        CoreRules.FILTER_INTO_JOIN,
+        CoreRules.JOIN_CONDITION_PUSH,
+        CoreRules.AGGREGATE_PROJECT_MERGE, CoreRules.AGGREGATE_JOIN_TRANSPOSE_EXTENDED);
     sql(query).withPostgresql().optimize(rules, hepPlanner).ok(expect);
   }
 
-  @Test public void testRankFunctionForPrintingOfFrameBoundary() {
+  @Test void testRankFunctionForPrintingOfFrameBoundary() {
     String query = "SELECT rank() over (order by \"hire_date\") FROM \"employee\"";
     String expected = "SELECT RANK() OVER (ORDER BY \"hire_date\")\n"
         + "FROM \"foodmart\".\"employee\"";
@@ -2872,6 +3133,14 @@ class RelToSqlConverterTest {
         .ok(expected);
   }
 
+  @Test void testFloorPresto() {
+    String query = "SELECT floor(\"hire_date\" TO MINUTE) FROM \"employee\"";
+    String expected = "SELECT DATE_TRUNC('MINUTE', \"hire_date\")\nFROM \"foodmart\".\"employee\"";
+    sql(query)
+        .withPresto()
+        .ok(expected);
+  }
+
   @Test void testFloorMssqlWeek() {
     String query = "SELECT floor(\"hire_date\" TO WEEK) FROM \"employee\"";
     String expected = "SELECT CONVERT(DATETIME, CONVERT(VARCHAR(10), "
@@ -2900,7 +3169,7 @@ class RelToSqlConverterTest {
         .ok(expected);
   }
 
-  @Test public void testFloorWeek() {
+  @Test void testFloorWeek() {
     final String query = "SELECT floor(\"hire_date\" TO WEEK) FROM \"employee\"";
     final String expectedClickHouse = "SELECT toMonday(`hire_date`)\n"
         + "FROM `foodmart`.`employee`";
@@ -3042,7 +3311,7 @@ class RelToSqlConverterTest {
         .ok(expected);
   }
 
-  @Test public void testFloorMonth() {
+  @Test void testFloorMonth() {
     final String query = "SELECT floor(\"hire_date\" TO MONTH) FROM \"employee\"";
     final String expectedClickHouse = "SELECT toStartOfMonth(`hire_date`)\n"
         + "FROM `foodmart`.`employee`";
@@ -3132,6 +3401,8 @@ class RelToSqlConverterTest {
         + "FROM \"foodmart\".\"product\"";
     final String expectedPostgresql = "SELECT SUBSTRING(\"brand_name\" FROM 2)\n"
         + "FROM \"foodmart\".\"product\"";
+    final String expectedPresto = "SELECT SUBSTR(\"brand_name\", 2)\n"
+        + "FROM \"foodmart\".\"product\"";
     final String expectedSnowflake = expectedPostgresql;
     final String expectedRedshift = expectedPostgresql;
     final String expectedMysql = "SELECT SUBSTRING(`brand_name` FROM 2)\n"
@@ -3143,6 +3414,8 @@ class RelToSqlConverterTest {
         .ok(expectedOracle)
         .withPostgresql()
         .ok(expectedPostgresql)
+        .withPresto()
+        .ok(expectedPresto)
         .withSnowflake()
         .ok(expectedSnowflake)
         .withRedshift()
@@ -3163,6 +3436,8 @@ class RelToSqlConverterTest {
         + "FROM \"foodmart\".\"product\"";
     final String expectedPostgresql = "SELECT SUBSTRING(\"brand_name\" FROM 2 FOR 3)\n"
         + "FROM \"foodmart\".\"product\"";
+    final String expectedPresto = "SELECT SUBSTR(\"brand_name\", 2, 3)\n"
+        + "FROM \"foodmart\".\"product\"";
     final String expectedSnowflake = expectedPostgresql;
     final String expectedRedshift = expectedPostgresql;
     final String expectedMysql = "SELECT SUBSTRING(`brand_name` FROM 2 FOR 3)\n"
@@ -3176,6 +3451,8 @@ class RelToSqlConverterTest {
         .ok(expectedOracle)
         .withPostgresql()
         .ok(expectedPostgresql)
+        .withPresto()
+        .ok(expectedPresto)
         .withSnowflake()
         .ok(expectedSnowflake)
         .withRedshift()
@@ -4316,6 +4593,14 @@ class RelToSqlConverterTest {
         + "UNION ALL\n"
         + "SELECT 2 \"a\", 'yy' \"b\"\n"
         + "FROM \"DUAL\")";
+    final String expectedHive = "SELECT a\n"
+        + "FROM (SELECT 1 a, 'x ' b\n"
+        + "UNION ALL\n"
+        + "SELECT 2 a, 'yy' b)";
+    final String expectedBigQuery = "SELECT a\n"
+        + "FROM (SELECT 1 AS a, 'x ' AS b\n"
+        + "UNION ALL\n"
+        + "SELECT 2 AS a, 'yy' AS b)";
     final String expectedSnowflake = expectedPostgresql;
     final String expectedRedshift = expectedPostgresql;
     sql(sql)
@@ -4327,6 +4612,10 @@ class RelToSqlConverterTest {
         .ok(expectedPostgresql)
         .withOracle()
         .ok(expectedOracle)
+        .withHive()
+        .ok(expectedHive)
+        .withBigQuery()
+        .ok(expectedBigQuery)
         .withSnowflake()
         .ok(expectedSnowflake)
         .withRedshift()
@@ -4358,9 +4647,10 @@ class RelToSqlConverterTest {
         .ok(expectedPostgresql);
   }
 
-  /** Test case fo
+  /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-3840">[CALCITE-3840]
-   * Re-aliasing of VALUES that has column aliases produces wrong SQL in the JDBC adapter</a>*/
+   * Re-aliasing of VALUES that has column aliases produces wrong SQL in the
+   * JDBC adapter</a>. */
   @Test void testValuesReAlias() {
     final RelBuilder builder = relBuilder();
     final RelNode root = builder
@@ -4375,6 +4665,14 @@ class RelToSqlConverterTest {
         + "FULL JOIN (VALUES  (1, 'x '),\n"
         + " (2, 'yy')) AS \"t0\" (\"a\", \"b\") ON TRUE";
     assertThat(toSql(root), isLinux(expectedSql));
+  }
+
+  @Test void testSelectWithoutFromEmulationForHiveAndBigQuery() {
+    String query = "select 2 + 2";
+    final String expected = "SELECT 2 + 2";
+    sql(query)
+        .withHive().ok(expected)
+        .withBigQuery().ok(expected);
   }
 
   /** Test case for
@@ -4532,11 +4830,11 @@ class RelToSqlConverterTest {
   }
 
   @Test void testWithinGroup4() {
-    // filter in AggregateCall is not unparsed
     final String query = "select \"product_class_id\", collect(\"net_weight\") "
         + "within group (order by \"net_weight\" desc) filter (where \"net_weight\" > 0)"
         + "from \"product\" group by \"product_class_id\"";
     final String expected = "SELECT \"product_class_id\", COLLECT(\"net_weight\") "
+        + "FILTER (WHERE \"net_weight\" > 0 IS TRUE) "
         + "WITHIN GROUP (ORDER BY \"net_weight\" DESC)\n"
         + "FROM \"foodmart\".\"product\"\n"
         + "GROUP BY \"product_class_id\"";
@@ -4690,7 +4988,7 @@ class RelToSqlConverterTest {
     sql(query).ok(expected);
   }
 
-  @Test void testCubeInSpark() {
+  @Test void testCubeWithGroupBy() {
     final String query = "select count(*) "
         + "from \"foodmart\".\"product\" "
         + "group by cube(\"product_id\",\"product_class_id\")";
@@ -4700,13 +4998,18 @@ class RelToSqlConverterTest {
     final String expectedInSpark = "SELECT COUNT(*)\n"
         + "FROM foodmart.product\n"
         + "GROUP BY product_id, product_class_id WITH CUBE";
+    final String expectedPresto = "SELECT COUNT(*)\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY CUBE(\"product_id\", \"product_class_id\")";
     sql(query)
         .ok(expected)
         .withSpark()
-        .ok(expectedInSpark);
+        .ok(expectedInSpark)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
-  @Test void testRollupInSpark() {
+  @Test void testRollupWithGroupBy() {
     final String query = "select count(*) "
         + "from \"foodmart\".\"product\" "
         + "group by rollup(\"product_id\",\"product_class_id\")";
@@ -4716,10 +5019,15 @@ class RelToSqlConverterTest {
     final String expectedInSpark = "SELECT COUNT(*)\n"
         + "FROM foodmart.product\n"
         + "GROUP BY product_id, product_class_id WITH ROLLUP";
+    final String expectedPresto = "SELECT COUNT(*)\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "GROUP BY ROLLUP(\"product_id\", \"product_class_id\")";
     sql(query)
         .ok(expected)
         .withSpark()
-        .ok(expectedInSpark);
+        .ok(expectedInSpark)
+        .withPresto()
+        .ok(expectedPresto);
   }
 
   @Test void testJsonType() {
@@ -4862,92 +5170,127 @@ class RelToSqlConverterTest {
     assertTrue(postgresqlDialect.supportsDataType(integerDataType));
   }
 
-  @Test void testSelectNull() {
-    String query = "SELECT CAST(NULL AS INT)";
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-4150">[CALCITE-4150]
+   * JDBC adapter throws UnsupportedOperationException when generating SQL
+   * for untyped NULL literal</a>. */
+  @Test void testSelectRawNull() {
+    final String query = "SELECT NULL FROM \"product\"";
+    final String expected = "SELECT NULL\n"
+        + "FROM \"foodmart\".\"product\"";
+    sql(query).ok(expected);
+  }
+
+  @Test void testSelectRawNullWithAlias() {
+    final String query = "SELECT NULL AS DUMMY FROM \"product\"";
+    final String expected = "SELECT NULL AS \"DUMMY\"\n"
+        + "FROM \"foodmart\".\"product\"";
+    sql(query).ok(expected);
+  }
+
+  @Test void testSelectNullWithCast() {
+    final String query = "SELECT CAST(NULL AS INT)";
     final String expected = "SELECT CAST(NULL AS INTEGER)\n"
-            + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")";
+        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")";
     sql(query).ok(expected);
     // validate
     sql(expected).exec();
   }
 
   @Test void testSelectNullWithCount() {
-    String query = "SELECT COUNT(CAST(NULL AS INT))";
+    final String query = "SELECT COUNT(CAST(NULL AS INT))";
     final String expected = "SELECT COUNT(CAST(NULL AS INTEGER))\n"
-            + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")";
+        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")";
     sql(query).ok(expected);
     // validate
     sql(expected).exec();
   }
 
   @Test void testSelectNullWithGroupByNull() {
-    String query = "SELECT COUNT(CAST(NULL AS INT)) FROM (VALUES  (0))\n"
-            + "AS \"t\" GROUP BY CAST(NULL AS VARCHAR CHARACTER SET \"ISO-8859-1\")";
+    final String query = "SELECT COUNT(CAST(NULL AS INT))\n"
+        + "FROM (VALUES  (0))AS \"t\"\n"
+        + "GROUP BY CAST(NULL AS VARCHAR CHARACTER SET \"ISO-8859-1\")";
     final String expected = "SELECT COUNT(CAST(NULL AS INTEGER))\n"
-            + "FROM (VALUES  (0)) AS \"t\" (\"EXPR$0\")\nGROUP BY CAST(NULL "
-            + "AS VARCHAR CHARACTER SET \"ISO-8859-1\")";
+        + "FROM (VALUES  (0)) AS \"t\" (\"EXPR$0\")\nGROUP BY CAST(NULL "
+        + "AS VARCHAR CHARACTER SET \"ISO-8859-1\")";
     sql(query).ok(expected);
     // validate
     sql(expected).exec();
   }
 
   @Test void testSelectNullWithGroupByVar() {
-    String query = "SELECT COUNT(CAST(NULL AS INT)) FROM \"account\"\n"
-            + "AS \"t\" GROUP BY \"account_type\"";
+    final String query = "SELECT COUNT(CAST(NULL AS INT))\n"
+        + "FROM \"account\" AS \"t\"\n"
+        + "GROUP BY \"account_type\"";
     final String expected = "SELECT COUNT(CAST(NULL AS INTEGER))\n"
-            + "FROM \"foodmart\".\"account\"\n"
-            + "GROUP BY \"account_type\"";
+        + "FROM \"foodmart\".\"account\"\n"
+        + "GROUP BY \"account_type\"";
     sql(query).ok(expected);
     // validate
     sql(expected).exec();
   }
 
   @Test void testSelectNullWithInsert() {
-    String query = "insert into\n"
-            + "\"account\"(\"account_id\",\"account_parent\",\"account_type\",\"account_rollup\")\n"
-            + "select 1, cast(NULL AS INT), cast(123 as varchar), cast(123 as varchar)";
+    final String query = "insert into\n"
+        + "\"account\"(\"account_id\",\"account_parent\",\"account_type\",\"account_rollup\")\n"
+        + "select 1, cast(NULL AS INT), cast(123 as varchar), cast(123 as varchar)";
     final String expected = "INSERT INTO \"foodmart\".\"account\" ("
-            + "\"account_id\", \"account_parent\", \"account_description\", "
-            + "\"account_type\", \"account_rollup\", \"Custom_Members\")\n"
-            + "(SELECT 1 AS \"account_id\", CAST(NULL AS INTEGER) AS \"account_parent\","
-            + " CAST(NULL AS VARCHAR(30) CHARACTER SET "
-            + "\"ISO-8859-1\") AS \"account_description\", '123' AS \"account_type\", "
-            + "'123' AS \"account_rollup\", CAST(NULL AS VARCHAR"
-            + "(255) CHARACTER SET \"ISO-8859-1\") AS \"Custom_Members\"\n"
-            + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\"))";
+        + "\"account_id\", \"account_parent\", \"account_description\", "
+        + "\"account_type\", \"account_rollup\", \"Custom_Members\")\n"
+        + "(SELECT 1 AS \"account_id\", CAST(NULL AS INTEGER) AS \"account_parent\","
+        + " CAST(NULL AS VARCHAR(30) CHARACTER SET "
+        + "\"ISO-8859-1\") AS \"account_description\", '123' AS \"account_type\", "
+        + "'123' AS \"account_rollup\", CAST(NULL AS VARCHAR"
+        + "(255) CHARACTER SET \"ISO-8859-1\") AS \"Custom_Members\"\n"
+        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\"))";
     sql(query).ok(expected);
     // validate
     sql(expected).exec();
   }
 
   @Test void testSelectNullWithInsertFromJoin() {
-    String query = "insert into\n"
-            + "\"account\"(\"account_id\",\"account_parent\",\n"
-            + "\"account_type\",\"account_rollup\")\n"
-            + "select \"product\".\"product_id\",\n"
-            + "cast(NULL AS INT),\n"
-            + "cast(\"product\".\"product_id\" as varchar),\n"
-            + "cast(\"sales_fact_1997\".\"store_id\" as varchar)\n"
-            + "from \"product\"\n"
-            + "inner join \"sales_fact_1997\"\n"
-            + "on \"product\".\"product_id\" = \"sales_fact_1997\".\"product_id\"";
+    final String query = "insert into\n"
+        + "\"account\"(\"account_id\",\"account_parent\",\n"
+        + "\"account_type\",\"account_rollup\")\n"
+        + "select \"product\".\"product_id\",\n"
+        + "cast(NULL AS INT),\n"
+        + "cast(\"product\".\"product_id\" as varchar),\n"
+        + "cast(\"sales_fact_1997\".\"store_id\" as varchar)\n"
+        + "from \"product\"\n"
+        + "inner join \"sales_fact_1997\"\n"
+        + "on \"product\".\"product_id\" = \"sales_fact_1997\".\"product_id\"";
     final String expected = "INSERT INTO \"foodmart\".\"account\" "
-            + "(\"account_id\", \"account_parent\", \"account_description\", "
-            + "\"account_type\", \"account_rollup\", \"Custom_Members\")\n"
-            + "(SELECT \"product\".\"product_id\" AS \"account_id\", "
-            + "CAST(NULL AS INTEGER) AS \"account_parent\", CAST(NULL AS VARCHAR"
-            + "(30) CHARACTER SET \"ISO-8859-1\") AS \"account_description\", "
-            + "CAST(\"product\".\"product_id\" AS VARCHAR CHARACTER SET "
-            + "\"ISO-8859-1\") AS \"account_type\", "
-            + "CAST(\"sales_fact_1997\".\"store_id\" AS VARCHAR CHARACTER SET \"ISO-8859-1\") AS "
-            + "\"account_rollup\", "
-            + "CAST(NULL AS VARCHAR(255) CHARACTER SET \"ISO-8859-1\") AS \"Custom_Members\"\n"
-            + "FROM \"foodmart\".\"product\"\n"
-            + "INNER JOIN \"foodmart\".\"sales_fact_1997\" "
-            + "ON \"product\".\"product_id\" = \"sales_fact_1997\".\"product_id\")";
+        + "(\"account_id\", \"account_parent\", \"account_description\", "
+        + "\"account_type\", \"account_rollup\", \"Custom_Members\")\n"
+        + "(SELECT \"product\".\"product_id\" AS \"account_id\", "
+        + "CAST(NULL AS INTEGER) AS \"account_parent\", CAST(NULL AS VARCHAR"
+        + "(30) CHARACTER SET \"ISO-8859-1\") AS \"account_description\", "
+        + "CAST(\"product\".\"product_id\" AS VARCHAR CHARACTER SET "
+        + "\"ISO-8859-1\") AS \"account_type\", "
+        + "CAST(\"sales_fact_1997\".\"store_id\" AS VARCHAR CHARACTER SET \"ISO-8859-1\") AS "
+        + "\"account_rollup\", "
+        + "CAST(NULL AS VARCHAR(255) CHARACTER SET \"ISO-8859-1\") AS \"Custom_Members\"\n"
+        + "FROM \"foodmart\".\"product\"\n"
+        + "INNER JOIN \"foodmart\".\"sales_fact_1997\" "
+        + "ON \"product\".\"product_id\" = \"sales_fact_1997\".\"product_id\")";
     sql(query).ok(expected);
     // validate
     sql(expected).exec();
+  }
+
+  @Test void testCastDecimalOverflow() {
+    final String query =
+        "SELECT CAST('11111111111111111111111111111111.111111' AS DECIMAL(38,6)) AS \"num\" from \"product\"";
+    final String expected =
+        "SELECT CAST('11111111111111111111111111111111.111111' AS DECIMAL(19, 6)) AS \"num\"\n"
+            + "FROM \"foodmart\".\"product\"";
+    sql(query).ok(expected);
+
+    final String query2 =
+        "SELECT CAST(1111111 AS DECIMAL(5,2)) AS \"num\" from \"product\"";
+    final String expected2 =
+        "SELECT CAST(1111111 AS DECIMAL(5, 2)) AS \"num\"\nFROM \"foodmart\".\"product\"";
+    sql(query2).ok(expected2);
   }
 
   @Test void testCastInStringIntegerComparison() {
@@ -4997,53 +5340,39 @@ class RelToSqlConverterTest {
   }
 
   @Test void testRowValueExpression() {
-    final String expected0 = "INSERT INTO SCOTT.DEPT (DEPTNO, DNAME, LOC)\n"
+    String sql = "insert into \"DEPT\"\n"
+        + "values ROW(1,'Fred', 'San Francisco'), ROW(2, 'Eric', 'Washington')";
+    final String expectedDefault = "INSERT INTO \"SCOTT\".\"DEPT\""
+        + " (\"DEPTNO\", \"DNAME\", \"LOC\")\n"
         + "SELECT 1, 'Fred', 'San Francisco'\n"
-        + "FROM (VALUES  (0)) t (ZERO)\n"
+        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")\n"
         + "UNION ALL\n"
         + "SELECT 2, 'Eric', 'Washington'\n"
-        + "FROM (VALUES  (0)) t (ZERO)";
-    String sql = "insert into \"DEPT\"\n"
-            + "values ROW(1,'Fred', 'San Francisco'), ROW(2, 'Eric', 'Washington')";
-    sql(sql)
-        .schema(CalciteAssert.SchemaSpec.JDBC_SCOTT)
-        .withHive()
-        .ok(expected0);
-
-    final String expected1 = "INSERT INTO `SCOTT`.`DEPT` (`DEPTNO`, `DNAME`, `LOC`)\n"
+        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")";
+    final String expectedHive = "INSERT INTO SCOTT.DEPT (DEPTNO, DNAME, LOC)\n"
         + "SELECT 1, 'Fred', 'San Francisco'\n"
         + "UNION ALL\n"
         + "SELECT 2, 'Eric', 'Washington'";
-    sql(sql)
-        .schema(CalciteAssert.SchemaSpec.JDBC_SCOTT)
-        .withMysql()
-        .ok(expected1);
-
-    final String expected2 = "INSERT INTO \"SCOTT\".\"DEPT\" (\"DEPTNO\", "
-        + "\"DNAME\", \"LOC\")\n"
+    final String expectedMysql = "INSERT INTO `SCOTT`.`DEPT`"
+        + " (`DEPTNO`, `DNAME`, `LOC`)\nSELECT 1, 'Fred', 'San Francisco'\n"
+        + "UNION ALL\n"
+        + "SELECT 2, 'Eric', 'Washington'";
+    final String expectedOracle = "INSERT INTO \"SCOTT\".\"DEPT\""
+        + " (\"DEPTNO\", \"DNAME\", \"LOC\")\n"
         + "SELECT 1, 'Fred', 'San Francisco'\n"
         + "FROM \"DUAL\"\n"
         + "UNION ALL\n"
         + "SELECT 2, 'Eric', 'Washington'\n"
         + "FROM \"DUAL\"";
-    sql(sql)
-        .schema(CalciteAssert.SchemaSpec.JDBC_SCOTT)
-        .withOracle()
-        .ok(expected2);
-
-    final String expected3 = "INSERT INTO [SCOTT].[DEPT] ([DEPTNO], [DNAME], [LOC])\n"
+    final String expectedMssql = "INSERT INTO [SCOTT].[DEPT]"
+        + " ([DEPTNO], [DNAME], [LOC])\n"
         + "SELECT 1, 'Fred', 'San Francisco'\n"
         + "FROM (VALUES  (0)) AS [t] ([ZERO])\n"
         + "UNION ALL\n"
         + "SELECT 2, 'Eric', 'Washington'\n"
         + "FROM (VALUES  (0)) AS [t] ([ZERO])";
-    sql(sql)
-        .schema(CalciteAssert.SchemaSpec.JDBC_SCOTT)
-        .withMssql()
-        .ok(expected3);
-
-    final String expected4 = "INSERT INTO \"SCOTT\".\"DEPT\" (\"DEPTNO\", "
-        + "\"DNAME\", \"LOC\")\n"
+    final String expectedCalcite = "INSERT INTO \"SCOTT\".\"DEPT\""
+        + " (\"DEPTNO\", \"DNAME\", \"LOC\")\n"
         + "SELECT 1, 'Fred', 'San Francisco'\n"
         + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")\n"
         + "UNION ALL\n"
@@ -5051,18 +5380,12 @@ class RelToSqlConverterTest {
         + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")";
     sql(sql)
         .schema(CalciteAssert.SchemaSpec.JDBC_SCOTT)
-        .ok(expected4);
-
-    final String expected5 = "INSERT INTO \"SCOTT\".\"DEPT\" (\"DEPTNO\", "
-        + "\"DNAME\", \"LOC\")\n"
-        + "SELECT 1, 'Fred', 'San Francisco'\n"
-        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")\n"
-        + "UNION ALL\n"
-        + "SELECT 2, 'Eric', 'Washington'\n"
-        + "FROM (VALUES  (0)) AS \"t\" (\"ZERO\")";
-    sql(sql).withCalcite()
-            .schema(CalciteAssert.SchemaSpec.JDBC_SCOTT)
-            .ok(expected5);
+        .ok(expectedDefault)
+        .withHive().ok(expectedHive)
+        .withMysql().ok(expectedMysql)
+        .withOracle().ok(expectedOracle)
+        .withMssql().ok(expectedMssql)
+        .withCalcite().ok(expectedCalcite);
   }
 
   @Test void testInsertValuesWithDynamicParams() {
@@ -5151,8 +5474,7 @@ class RelToSqlConverterTest {
     // Parse the input SQL with PostgreSQL dialect,
     // in which "isHavingAlias" is false.
     final SqlParser.Config parserConfig =
-        PostgresqlSqlDialect.DEFAULT.configureParser(SqlParser.configBuilder())
-            .build();
+        PostgresqlSqlDialect.DEFAULT.configureParser(SqlParser.config());
 
     // Convert rel node to SQL with BigQuery dialect,
     // in which "isHavingAlias" is true.
@@ -5264,6 +5586,10 @@ class RelToSqlConverterTest {
 
     Sql withPostgresql() {
       return dialect(SqlDialect.DatabaseProduct.POSTGRESQL.getDialect());
+    }
+
+    Sql withPresto() {
+      return dialect(DatabaseProduct.PRESTO.getDialect());
     }
 
     Sql withRedshift() {

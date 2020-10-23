@@ -58,15 +58,15 @@ public class RelMdColumnOrigins
 
   //~ Methods ----------------------------------------------------------------
 
-  public MetadataDef<BuiltInMetadata.ColumnOrigin> getDef() {
+  @Override public MetadataDef<BuiltInMetadata.ColumnOrigin> getDef() {
     return BuiltInMetadata.ColumnOrigin.DEF;
   }
 
   public Set<RelColumnOrigin> getColumnOrigins(Aggregate rel,
       RelMetadataQuery mq, int iOutputColumn) {
     if (iOutputColumn < rel.getGroupCount()) {
-      // Group columns pass through directly.
-      return mq.getColumnOrigins(rel.getInput(), iOutputColumn);
+      // get actual index of Group columns.
+      return mq.getColumnOrigins(rel.getInput(), rel.getGroupSet().asList().get(iOutputColumn));
     }
 
     // Aggregate columns are derived from input columns
@@ -270,9 +270,9 @@ public class RelMdColumnOrigins
   private Set<RelColumnOrigin> getMultipleColumns(RexNode rexNode, RelNode input,
       final RelMetadataQuery mq) {
     final Set<RelColumnOrigin> set = new HashSet<>();
-    RexVisitor visitor =
+    final RexVisitor<Void> visitor =
         new RexVisitorImpl<Void>(true) {
-          public Void visitInputRef(RexInputRef inputRef) {
+          @Override public Void visitInputRef(RexInputRef inputRef) {
             Set<RelColumnOrigin> inputSet =
                 mq.getColumnOrigins(input, inputRef.getIndex());
             if (inputSet != null) {

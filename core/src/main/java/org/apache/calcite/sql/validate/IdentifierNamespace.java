@@ -180,7 +180,7 @@ public class IdentifierNamespace extends AbstractNamespace {
         RESOURCE.objectNotFound(id.getComponent(0).toString()));
   }
 
-  public RelDataType validateImpl(RelDataType targetRowType) {
+  @Override public RelDataType validateImpl(RelDataType targetRowType) {
     resolvedNamespace = Objects.requireNonNull(resolveImpl(id));
     if (resolvedNamespace instanceof TableNamespace) {
       SqlValidatorTable table = resolvedNamespace.getTable();
@@ -228,7 +228,7 @@ public class IdentifierNamespace extends AbstractNamespace {
       final String fieldName = field.getName();
       final SqlMonotonicity monotonicity =
           resolvedNamespace.getMonotonicity(fieldName);
-      if (monotonicity != SqlMonotonicity.NOT_MONOTONIC) {
+      if (monotonicity != null && monotonicity != SqlMonotonicity.NOT_MONOTONIC) {
         builder.add(
             Pair.of((SqlNode) new SqlIdentifier(fieldName, SqlParserPos.ZERO),
                 monotonicity));
@@ -244,7 +244,7 @@ public class IdentifierNamespace extends AbstractNamespace {
     return id;
   }
 
-  public SqlNode getNode() {
+  @Override public SqlNode getNode() {
     return id;
   }
 
@@ -257,7 +257,7 @@ public class IdentifierNamespace extends AbstractNamespace {
     return resolvedNamespace == null ? null : resolve().getTable();
   }
 
-  public List<Pair<SqlNode, SqlMonotonicity>> getMonotonicExprs() {
+  @Override public List<Pair<SqlNode, SqlMonotonicity>> getMonotonicExprs() {
     return monotonicExprs;
   }
 

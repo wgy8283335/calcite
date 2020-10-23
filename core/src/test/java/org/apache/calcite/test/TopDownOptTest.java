@@ -23,9 +23,8 @@ import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.rel.RelCollationTraitDef;
-import org.apache.calcite.rel.rules.JoinCommuteRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.JoinPushThroughJoinRule;
-import org.apache.calcite.rel.rules.SortProjectTransposeRule;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -52,13 +51,13 @@ import java.util.List;
  * for details on the schema.
  *
  * <li>Run the test. It should fail. Inspect the output in
- * {@code target/surefire/.../TopDownOptTest.xml}.
+ * {@code build/resources/test/.../TopDownOptTest_actual.xml}.
  *
  * <li>Verify that the "planBefore" is the correct
  * translation of your SQL, and that it contains the pattern on which your rule
  * is supposed to fire. If all is well, replace
  * {@code src/test/resources/.../TopDownOptTest.xml} and
- * with the new {@code target/surefire/.../TopDownOptTest.xml}.
+ * with the new {@code build/resources/test/.../TopDownOptTest_actual.xml}.
  *
  * <li>Run the test again. It should fail again, but this time it should contain
  * a "planAfter" entry for your rule. Verify that your rule applied its
@@ -69,6 +68,18 @@ import java.util.List;
  * </ol>
  */
 class TopDownOptTest extends RelOptTestBase {
+  @Test void testValuesTraitRequest() {
+    final String sql = "SELECT * from (values (1, 1), (2, 1), (1, 2), (2, 2))\n"
+        + "as t(a, b) order by b, a";
+    Query.create(sql).check();
+  }
+
+  @Test void testValuesTraitRequestNeg() {
+    final String sql = "SELECT * from (values (1, 1), (2, 1), (3, 2), (2, 2))\n"
+        + "as t(a, b) order by b, a";
+    Query.create(sql).check();
+  }
+
   @Test void testSortAgg() {
     final String sql = "select mgr, count(*) from sales.emp\n"
         + "group by mgr order by mgr desc nulls last limit 5";
@@ -89,10 +100,52 @@ class TopDownOptTest extends RelOptTestBase {
     Query.create(sql).check();
   }
 
+  @Test void testSortMergeJoinSubsetKey() {
+    final String sql = "select * from\n"
+        + "sales.emp r join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by r.job desc nulls last";
+    Query.create(sql).check();
+  }
+
+  @Test void testSortMergeJoinSubsetKey2() {
+    final String sql = "select * from\n"
+        + "sales.emp r join sales.bonus s on r.ename=s.ename and r.job=s.job and r.sal = s.sal\n"
+        + "order by r.sal, r.ename desc nulls last";
+    Query.create(sql).check();
+  }
+
+  @Test void testSortMergeJoinSupersetKey() {
+    final String sql = "select * from\n"
+        + "sales.emp r join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by r.job desc nulls last, r.ename, r.sal desc";
+    Query.create(sql).check();
+  }
+
   @Test void testSortMergeJoinRight() {
     final String sql = "select * from\n"
         + "sales.emp r join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
         + "order by s.job desc nulls last, s.ename nulls first";
+    Query.create(sql).check();
+  }
+
+  @Test void testSortMergeJoinRightSubsetKey() {
+    final String sql = "select * from\n"
+        + "sales.emp r join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by s.job desc nulls last";
+    Query.create(sql).check();
+  }
+
+  @Test void testSortMergeJoinRightSubsetKey2() {
+    final String sql = "select * from\n"
+        + "sales.emp r join sales.bonus s on r.ename=s.ename and r.job=s.job and r.sal = s.sal\n"
+        + "order by s.sal, s.ename desc nulls last";
+    Query.create(sql).check();
+  }
+
+  @Test void testSortMergeJoinRightSupersetKey() {
+    final String sql = "select * from\n"
+        + "sales.emp r join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by s.job desc nulls last, s.ename, s.sal desc";
     Query.create(sql).check();
   }
 
@@ -129,6 +182,72 @@ class TopDownOptTest extends RelOptTestBase {
         + "on r.job=s.job and r.ename=s.ename";
     Query.create(sql)
         .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .check();
+  }
+
+  // Order by left field(s): push down sort to left input.
+  @Test void testCorrelateInnerJoinDeriveLeft() {
+    final String sql = "select * from emp e\n"
+        + "join dept d on e.deptno=d.deptno\n"
+        + "order by e.ename";
+    Query.create(sql)
+        .addRule(CoreRules.JOIN_TO_CORRELATE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Order by contains right field: sort cannot be pushed down.
+  @Test void testCorrelateInnerJoinNoDerive() {
+    final String sql = "select * from emp e\n"
+        + "join dept d on e.deptno=d.deptno\n"
+        + "order by e.ename, d.name";
+    Query.create(sql)
+        .addRule(CoreRules.JOIN_TO_CORRELATE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Order by left field(s): push down sort to left input.
+  @Test void testCorrelateLeftJoinDeriveLeft() {
+    final String sql = "select * from emp e\n"
+        + "left join dept d on e.deptno=d.deptno\n"
+        + "order by e.ename";
+    Query.create(sql)
+        .addRule(CoreRules.JOIN_TO_CORRELATE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Order by contains right field: sort cannot be pushed down.
+  @Test void testCorrelateLeftJoinNoDerive() {
+    final String sql = "select * from emp e\n"
+        + "left join dept d on e.deptno=d.deptno\n"
+        + "order by e.ename, d.name";
+    Query.create(sql)
+        .addRule(CoreRules.JOIN_TO_CORRELATE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Order by left field(s): push down sort to left input.
+  @Test void testCorrelateSemiJoinDeriveLeft() {
+    final String sql = "select * from dept d\n"
+        + "where exists (select 1 from emp e where e.deptno=d.deptno)\n"
+        + "order by d.name";
+    Query.create(sql)
+        .addRule(CoreRules.JOIN_TO_CORRELATE)
+        .addRule(CoreRules.JOIN_TO_SEMI_JOIN)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
         .check();
   }
 
@@ -287,6 +406,344 @@ class TopDownOptTest extends RelOptTestBase {
         .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
         .check();
   }
+
+  // Not push down sort for hash join in full outer join case.
+  @Test void testHashJoinFullOuterJoinNotPushDownSort() {
+    final String sql = "select * from\n"
+        + "sales.emp r full outer join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by r.job desc nulls last, r.ename nulls first";
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .check();
+  }
+
+  // Push down sort to left input.
+  @Test void testHashJoinLeftOuterJoinPushDownSort() {
+    final String sql = "select * from\n"
+        + "(select contactno, email from customer.contact_peek) r left outer join\n"
+        + "(select acctno, type from customer.account) s\n"
+        + "on r.contactno=s.acctno and r.email=s.type\n"
+        + "order by r.contactno desc, r.email desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Push down sort to left input.
+  @Test void testHashJoinLeftOuterJoinPushDownSort2() {
+    final String sql = "select * from\n"
+        + "customer.contact_peek r left outer join\n"
+        + "customer.account s\n"
+        + "on r.contactno=s.acctno and r.email=s.type\n"
+        + "order by r.fname desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Push down sort to left input.
+  @Test void testHashJoinInnerJoinPushDownSort() {
+    final String sql = "select * from\n"
+        + "(select contactno, email from customer.contact_peek) r inner join\n"
+        + "(select acctno, type from customer.account) s\n"
+        + "on r.contactno=s.acctno and r.email=s.type\n"
+        + "order by r.contactno desc, r.email desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // do not push down sort.
+  @Test void testHashJoinRightOuterJoinPushDownSort() {
+    final String sql = "select * from\n"
+        + "(select contactno, email from customer.contact_peek) r right outer join\n"
+        + "(select acctno, type from customer.account) s\n"
+        + "on r.contactno=s.acctno and r.email=s.type\n"
+        + "order by s.acctno desc, s.type desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // push sort to left input
+  @Test void testNestedLoopJoinLeftOuterJoinPushDownSort() {
+    final String sql = "select * from\n"
+        + " customer.contact_peek r left outer join\n"
+        + "customer.account s\n"
+        + "on r.contactno>s.acctno and r.email<s.type\n"
+        + "order by r.contactno desc, r.email desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // push sort to left input
+  @Test void testNestedLoopJoinLeftOuterJoinPushDownSort2() {
+    final String sql = "select * from\n"
+        + " customer.contact_peek r left outer join\n"
+        + "customer.account s\n"
+        + "on r.contactno>s.acctno and r.email<s.type\n"
+        + "order by r.fname desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // do not push sort to left input cause sort keys are on right input.
+  @Test void testNestedLoopJoinLeftOuterJoinSortKeyOnRightInput() {
+    final String sql = "select * from\n"
+        + " customer.contact_peek r left outer join\n"
+        + "customer.account s\n"
+        + "on r.contactno>s.acctno and r.email<s.type\n"
+        + "order by s.acctno desc, s.type desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // do not push down sort to right input because traits propagation does not work
+  // for right/full outer join.
+  @Test void testNestedLoopJoinRightOuterJoinSortPushDown() {
+    final String sql = "select r.contactno, r.email, s.acctno, s.type from\n"
+        + " customer.contact_peek r right outer join\n"
+        + "customer.account s\n"
+        + "on r.contactno>s.acctno and r.email<s.type\n"
+        + "order by s.acctno desc, s.type desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Collation can be derived from left input so that top Sort is removed.
+  @Test void testHashJoinTraitDerivation() {
+    final String sql = "select * from\n"
+        + "(select ename, job, mgr from sales.emp order by ename desc, job desc, mgr limit 10) r\n"
+        + "join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by r.ename desc, r.job desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Collation can be derived from left input so that top Sort is removed.
+  @Test void testHashJoinTraitDerivation2() {
+    final String sql = "select * from\n"
+        + "(select ename, job, mgr from sales.emp order by mgr desc limit 10) r\n"
+        + "join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by r.mgr desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Collation derived from left input is not what the top Sort needs.
+  @Test void testHashJoinTraitDerivationNegativeCase() {
+    final String sql = "select * from\n"
+        + "(select ename, job, mgr from sales.emp order by mgr desc limit 10) r\n"
+        + "join sales.bonus s on r.ename=s.ename and r.job=s.job\n"
+        + "order by r.mgr";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Collation can be derived from left input so that top Sort is removed.
+  @Test void testNestedLoopJoinTraitDerivation() {
+    final String sql = "select * from\n"
+        + "(select ename, job, mgr from sales.emp order by ename desc, job desc, mgr limit 10) r\n"
+        + "join sales.bonus s on r.ename>s.ename and r.job<s.job\n"
+        + "order by r.ename desc, r.job desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Collation can be derived from left input so that top Sort is removed.
+  @Test void testNestedLoopJoinTraitDerivation2() {
+    final String sql = "select * from\n"
+        + "(select ename, job, mgr from sales.emp order by mgr limit 10) r\n"
+        + "join sales.bonus s on r.ename>s.ename and r.job<s.job\n"
+        + "order by r.mgr";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // Collation derived from left input is not what the top Sort needs.
+  @Test void testNestedLoopJoinTraitDerivationNegativeCase() {
+    final String sql = "select * from\n"
+        + "(select ename, job, mgr from sales.emp order by mgr limit 10) r\n"
+        + "join sales.bonus s on r.ename>s.ename and r.job<s.job\n"
+        + "order by r.mgr desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .check();
+  }
+
+  // test if "order by mgr desc nulls last" can be pushed through the calc ("select mgr").
+  @Test void testSortCalc() {
+    final String sql = "select mgr from sales.emp order by mgr desc nulls last";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .check();
+  }
+
+  // test that Sort cannot push through calc because of non-trival call
+  // (e.g. RexCall(sal * -1)). In this example, the reason is that "sal * -1"
+  // creates opposite ordering if Sort is pushed down.
+  @Test void testSortCalcOnRexCall() {
+    final String sql = "select ename, sal * -1 as sal, mgr from\n"
+        + "sales.emp order by ename desc, sal desc, mgr desc nulls last";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .check();
+  }
+
+  // test that Sort can push through calc when cast is monotonic.
+  @Test void testSortCalcWhenCastLeadingToMonotonic() {
+    final String sql = "select cast(deptno as float) from sales.emp order by deptno desc";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .check();
+  }
+
+  // test that Sort cannot push through calc when cast is not monotonic.
+  @Test void testSortCalcWhenCastLeadingToNonMonotonic() {
+    final String sql = "select deptno from sales.emp order by cast(deptno as varchar) desc";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .check();
+  }
+
+  // test traits push through calc with filter.
+  @Test void testSortCalcWithFilter() {
+    final String sql = "select ename, job, mgr, max_sal from\n"
+        + "(select ename, job, mgr, max(sal) as max_sal from sales.emp group by ename, job, mgr) as t\n"
+        + "where max_sal > 1000\n"
+        + "order by mgr desc, ename";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(CoreRules.FILTER_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_FILTER_RULE)
+        .check();
+  }
+
+  // Do not need Sort for calc.
+  @Test void testSortCalcDerive1() {
+    final String sql = "select * from\n"
+        + "(select ename, job, max_sal + 1 from\n"
+        + "(select ename, job, max(sal) as max_sal from sales.emp "
+        + "group by ename, job) t) r\n"
+        + "join sales.bonus s on r.job=s.job and r.ename=s.ename";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .check();
+  }
+
+  // Need Sort for calc.
+  @Test void testSortCalcDerive2() {
+    final String sql = "select distinct ename, sal*-2, mgr\n"
+        + "from (select ename, mgr, sal from sales.emp order by ename, mgr, sal limit 100) t";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .check();
+  }
+
+  // Do not need Sort for left join input.
+  @Test void testSortCalcDerive3() {
+    final String sql = "select * from\n"
+        + "(select ename, cast(job as varchar) as job, sal + 1 from\n"
+        + "(select ename, job, sal from sales.emp limit 100) t) r\n"
+        + "join sales.bonus s on r.job=s.job and r.ename=s.ename";
+    Query.create(sql)
+        .addRule(CoreRules.PROJECT_TO_CALC)
+        .addRule(EnumerableRules.ENUMERABLE_CALC_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_PROJECT_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .check();
+  }
+
+  // push sort to left input
+  @Test void testBatchNestedLoopJoinLeftOuterJoinPushDownSort() {
+    final String sql = "select * from\n"
+        + " customer.contact_peek r left outer join\n"
+        + "customer.account s\n"
+        + "on r.contactno>s.acctno and r.email<s.type\n"
+        + "order by r.contactno desc, r.email desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .addRule(EnumerableRules.ENUMERABLE_BATCH_NESTED_LOOP_JOIN_RULE)
+        .check();
+  }
+
+  // Collation can be derived from left input so that top Sort is removed.
+  @Test void testBatchNestedLoopJoinTraitDerivation() {
+    final String sql = "select * from\n"
+        + "(select ename, job, mgr from sales.emp order by ename desc, job desc, mgr limit 10) r\n"
+        + "join sales.bonus s on r.ename>s.ename and r.job<s.job\n"
+        + "order by r.ename desc, r.job desc";
+
+    Query.create(sql)
+        .removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE)
+        .removeRule(EnumerableRules.ENUMERABLE_SORT_RULE)
+        .addRule(EnumerableRules.ENUMERABLE_BATCH_NESTED_LOOP_JOIN_RULE)
+        .check();
+  }
 }
 
 /**
@@ -313,7 +770,7 @@ class Query extends RelOptTestBase {
     RelOptUtil.registerDefaultRules(planner, false, false);
 
     // Remove to Keep deterministic join order.
-    planner.removeRule(JoinCommuteRule.INSTANCE);
+    planner.removeRule(CoreRules.JOIN_COMMUTE);
     planner.removeRule(JoinPushThroughJoinRule.LEFT);
     planner.removeRule(JoinPushThroughJoinRule.RIGHT);
 
@@ -322,7 +779,11 @@ class Query extends RelOptTestBase {
     planner.removeRule(EnumerableRules.ENUMERABLE_AGGREGATE_RULE);
 
     // pushing down sort should be handled by top-down optimization.
-    planner.removeRule(SortProjectTransposeRule.INSTANCE);
+    planner.removeRule(CoreRules.SORT_PROJECT_TRANSPOSE);
+
+    // Sort will only be pushed down by traits propagation.
+    planner.removeRule(CoreRules.SORT_JOIN_TRANSPOSE);
+    planner.removeRule(CoreRules.SORT_JOIN_COPY);
   }
 
   public static Query create(String sql) {
@@ -357,7 +818,9 @@ class Query extends RelOptTestBase {
     SqlToRelTestBase.Tester tester = createTester().withDecorrelation(true)
         .withClusterFactory(cluster -> RelOptCluster.create(planner, cluster.getRexBuilder()));
 
-    new Sql(tester, sql, null, planner,
-        ImmutableMap.of(), ImmutableList.of()).check();
+    final Sql sql =
+        new Sql(tester, this.sql, null, planner, ImmutableMap.of(),
+            ImmutableList.of());
+    sql.check();
   }
 }

@@ -19,8 +19,12 @@ package org.apache.calcite.util;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedMap;
+import com.google.common.util.concurrent.UncheckedExecutionException;
 
 import java.lang.annotation.Annotation;
 import java.lang.annotation.ElementType;
@@ -32,26 +36,75 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutionException;
+import javax.annotation.Nonnull;
 
 /** Utilities for creating immutable beans. */
 public class ImmutableBeans {
+  /** Cache of method handlers of each known class, because building a set of
+   * handlers is too expensive to do each time we create a bean.
+   *
+   * <p>The cache uses weak keys so that if a class is unloaded, the cache
+   * entry will be removed. */
+  private static final LoadingCache<Class, Def> CACHE =
+      CacheBuilder.newBuilder()
+          .weakKeys()
+          .softValues()
+          .build(new CacheLoader<Class, Def>() {
+            @Override public Def load(@Nonnull Class key) {
+              //noinspection unchecked
+              return makeDef(key);
+            }
+          });
+
   private ImmutableBeans() {}
 
   /** Creates an immutable bean that implements a given interface. */
   public static <T> T create(Class<T> beanClass) {
+    return create_(beanClass, ImmutableMap.of());
+  }
+
+  /** Creates a bean of a given class whose contents are the same as this bean.
+   *
+   * <p>You typically use this to downcast a bean to a sub-class. */
+  public static <T> T copy(Class<T> beanClass, @Nonnull Object o) {
+    final BeanImpl<?> bean = (BeanImpl) Proxy.getInvocationHandler(o);
+    return create_(beanClass, bean.map);
+  }
+
+  private static <T> T create_(Class<T> beanClass,
+      ImmutableMap<String, Object> valueMap) {
     if (!beanClass.isInterface()) {
       throw new IllegalArgumentException("must be interface");
     }
+    try {
+      @SuppressWarnings("unchecked")
+      final Def<T> def =
+          (Def) CACHE.get(beanClass);
+      return def.makeBean(valueMap);
+    } catch (ExecutionException | UncheckedExecutionException e) {
+      if (e.getCause() instanceof RuntimeException) {
+        throw (RuntimeException) e.getCause();
+      }
+      throw new RuntimeException(e);
+    }
+  }
+
+  private static <T> Def<T> makeDef(Class<T> beanClass) {
     final ImmutableSortedMap.Builder<String, Class> propertyNameBuilder =
         ImmutableSortedMap.naturalOrder();
     final ImmutableMap.Builder<Method, Handler<T>> handlers =
         ImmutableMap.builder();
     final Set<String> requiredPropertyNames = new HashSet<>();
+    final Set<String> copyPropertyNames = new HashSet<>();
 
     // First pass, add "get" methods and build a list of properties.
     for (Method method : beanClass.getMethods()) {
@@ -91,6 +144,12 @@ public class ImmutableBeans {
       if (required) {
         requiredPropertyNames.add(propertyName);
       }
+      final boolean copy = property.makeImmutable()
+          && (ReflectUtil.mightBeAssignableFrom(propertyType, Collection.class)
+              || ReflectUtil.mightBeAssignableFrom(propertyType, Map.class));
+      if (copy) {
+        copyPropertyNames.add(propertyName);
+      }
       propertyNameBuilder.put(propertyName, propertyType);
       final Object defaultValue2 =
           convertDefault(defaultValue, propertyName, propertyType);
@@ -120,12 +179,18 @@ public class ImmutableBeans {
           || method.isDefault()) {
         continue;
       }
+      final Property property = method.getAnnotation(Property.class);
       final Mode mode;
       final String propertyName;
       final String methodName = method.getName();
       if (methodName.startsWith("get")) {
         continue;
       } else if (methodName.startsWith("is")) {
+        continue;
+      } else if (property != null) {
+        // If there is a property annotation, treat this as a getter. For
+        // example, there could be a property "set", with getter method
+        // "Set<String> set()" and setter method "Bean withSet(Set<String>)".
         continue;
       } else if (methodName.startsWith("with")) {
         propertyName = methodName.substring("with".length());
@@ -144,7 +209,8 @@ public class ImmutableBeans {
       }
       switch (mode) {
       case WITH:
-        if (method.getReturnType() != beanClass) {
+        if (method.getReturnType() != beanClass
+            && method.getReturnType() != method.getDeclaringClass()) {
           throw new IllegalArgumentException("method '" + methodName
               + "' should return the bean class '" + beanClass
               + "', actually returns '" + method.getReturnType() + "'");
@@ -156,6 +222,9 @@ public class ImmutableBeans {
               + "' should return void, actually returns '"
               + method.getReturnType() + "'");
         }
+        break;
+      default:
+        break;
       }
       if (method.getParameterCount() != 1) {
         throw new IllegalArgumentException("method '" + methodName
@@ -169,6 +238,7 @@ public class ImmutableBeans {
             + ", actually has " + method.getParameterTypes()[0]);
       }
       final boolean required = requiredPropertyNames.contains(propertyName);
+      final boolean copy = copyPropertyNames.contains(propertyName);
       handlers.put(method, (bean, args) -> {
         switch (mode) {
         case WITH:
@@ -192,7 +262,7 @@ public class ImmutableBeans {
                 .putAll(bean.map);
           }
           if (args[0] != null) {
-            mapBuilder.put(propertyName, args[0]);
+            mapBuilder.put(propertyName, value(copy, args[0]));
           } else {
             if (required) {
               throw new IllegalArgumentException("cannot set required "
@@ -245,7 +315,23 @@ public class ImmutableBeans {
             // Strictly, a bean should not equal a Map but it's convenient
             || args[0] instanceof Map
             && bean.map.equals(args[0]));
-    return makeBean(beanClass, handlers.build(), ImmutableMap.of());
+    return new Def<>(beanClass, handlers.build());
+  }
+
+  /** Returns the value to be stored, optionally copying. */
+  private static Object value(boolean copy, Object o) {
+    if (copy) {
+      if (o instanceof List) {
+        return ImmutableNullableList.copyOf((List) o);
+      }
+      if (o instanceof Set) {
+        return ImmutableNullableSet.copyOf((Set) o);
+      }
+      if (o instanceof Map) {
+        return ImmutableNullableMap.copyOf((Map) o);
+      }
+    }
+    return o;
   }
 
   /** Looks for an annotation by class name.
@@ -312,13 +398,7 @@ public class ImmutableBeans {
     }
   }
 
-  private static <T> T makeBean(Class<T> beanClass,
-      ImmutableMap<Method, Handler<T>> handlers,
-      ImmutableMap<String, Object> map) {
-    return new BeanImpl<>(beanClass, handlers, map).asBean();
-  }
-
-  /** Is the method reading or writing? */
+  /** Whether the method is reading or writing. */
   private enum Mode {
     GET, SET, WITH
   }
@@ -343,6 +423,9 @@ public class ImmutableBeans {
      * If it has no default value, calling "get" will give a runtime exception.
      */
     boolean required() default false;
+
+    /** Whether to make immutable copies of property values. */
+    boolean makeImmutable() default true;
   }
 
   /** Default value of an int property. */
@@ -385,19 +468,16 @@ public class ImmutableBeans {
    *
    * @param <T> Bean type */
   private static class BeanImpl<T> implements InvocationHandler {
-    private final ImmutableMap<Method, Handler<T>> handlers;
+    private final Def<T> def;
     private final ImmutableMap<String, Object> map;
-    private final Class<T> beanClass;
 
-    BeanImpl(Class<T> beanClass, ImmutableMap<Method, Handler<T>> handlers,
-        ImmutableMap<String, Object> map) {
-      this.beanClass = beanClass;
-      this.handlers = handlers;
-      this.map = map;
+    BeanImpl(Def<T> def, ImmutableMap<String, Object> map) {
+      this.def = Objects.requireNonNull(def);
+      this.map = Objects.requireNonNull(map);
     }
 
-    public Object invoke(Object proxy, Method method, Object[] args) {
-      final Handler handler = handlers.get(method);
+    @Override public Object invoke(Object proxy, Method method, Object[] args) {
+      final Handler handler = def.handlers.get(method);
       if (handler == null) {
         throw new IllegalArgumentException("no handler for method " + method);
       }
@@ -406,15 +486,32 @@ public class ImmutableBeans {
 
     /** Returns a copy of this bean that has a different map. */
     BeanImpl<T> withMap(ImmutableMap<String, Object> map) {
-      return new BeanImpl<T>(beanClass, handlers, map);
+      return new BeanImpl<>(def, map);
     }
 
     /** Wraps this handler in a proxy that implements the required
      * interface. */
     T asBean() {
-      return beanClass.cast(
-          Proxy.newProxyInstance(beanClass.getClassLoader(),
-              new Class[] {beanClass}, this));
+      return def.beanClass.cast(
+          Proxy.newProxyInstance(def.beanClass.getClassLoader(),
+              new Class[] {def.beanClass}, this));
+    }
+  }
+
+  /** Definition of a bean. Consists of its class and handlers.
+   *
+   * @param <T> Class of bean */
+  private static class Def<T> {
+    private final Class<T> beanClass;
+    private final ImmutableMap<Method, Handler<T>> handlers;
+
+    Def(Class<T> beanClass, ImmutableMap<Method, Handler<T>> handlers) {
+      this.beanClass = Objects.requireNonNull(beanClass);
+      this.handlers = Objects.requireNonNull(handlers);
+    }
+
+    private T makeBean(ImmutableMap<String, Object> map) {
+      return new BeanImpl<>(this, map).asBean();
     }
   }
 }

@@ -16,50 +16,51 @@
  */
 package org.apache.calcite.sql;
 
-import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.sql.type.SqlOperandCountRanges;
-import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.calcite.sql.type.SqlTypeUtil;
-import org.apache.calcite.sql.validate.SqlValidator;
+import com.google.common.collect.ImmutableList;
 
 /**
- * SqlTumbleTableFunction implements an operator for tumbling. It allows three parameters:
- * 1. a table.
- * 2. a descriptor to provide a watermarked column name from the input table.
- * 3. an interval parameter to specify the length of window size.
+ * SqlTumbleTableFunction implements an operator for tumbling.
+ *
+ * <p>It allows three parameters:
+ *
+ * <ol>
+ *   <li>a table</li>
+ *   <li>a descriptor to provide a watermarked column name from the input table</li>
+ *   <li>an interval parameter to specify the length of window size</li>
+ * </ol>
  */
 public class SqlTumbleTableFunction extends SqlWindowTableFunction {
   public SqlTumbleTableFunction() {
-    super(SqlKind.TUMBLE.name());
+    super(SqlKind.TUMBLE.name(), new OperandMetadataImpl());
   }
 
-  @Override public SqlOperandCountRange getOperandCountRange() {
-    return SqlOperandCountRanges.of(3);
-  }
+  /** Operand type checker for TUMBLE. */
+  private static class OperandMetadataImpl extends AbstractOperandMetadata {
+    OperandMetadataImpl() {
+      super(
+          ImmutableList.of(PARAM_DATA, PARAM_TIMECOL, PARAM_SIZE, PARAM_OFFSET),
+          3);
+    }
 
-  @Override public boolean checkOperandTypes(SqlCallBinding callBinding,
-      boolean throwOnFailure) {
-    // There should only be three operands, and number of operands are checked before
-    // this call.
-    final SqlNode operand0 = callBinding.operand(0);
-    final SqlValidator validator = callBinding.getValidator();
-    final RelDataType type = validator.getValidatedNodeType(operand0);
-    if (type.getSqlTypeName() != SqlTypeName.ROW) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+    @Override public boolean checkOperandTypes(SqlCallBinding callBinding,
+        boolean throwOnFailure) {
+      // There should only be three operands, and number of operands are checked before
+      // this call.
+      if (!checkTableAndDescriptorOperands(callBinding, 1)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      if (!checkTimeColumnDescriptorOperand(callBinding, 1)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      if (!checkIntervalOperands(callBinding, 2)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      return true;
     }
-    final SqlNode operand1 = callBinding.operand(1);
-    if (operand1.getKind() != SqlKind.DESCRIPTOR) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    validateColumnNames(validator, type.getFieldNames(), ((SqlCall) operand1).getOperandList());
-    final RelDataType type2 = validator.getValidatedNodeType(callBinding.operand(2));
-    if (!SqlTypeUtil.isInterval(type2)) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    return true;
-  }
 
-  @Override public String getAllowedSignatures(String opNameToUse) {
-    return getName() + "(TABLE table_name, DESCRIPTOR(col1, col2 ...), datetime interval)";
+    @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+      return opName + "(TABLE table_name, DESCRIPTOR(timecol), datetime interval"
+          + "[, datetime interval])";
+    }
   }
 }

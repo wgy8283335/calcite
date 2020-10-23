@@ -137,6 +137,7 @@ public class Resources {
         new InvocationHandler() {
           final Map<String, Object> cache = new ConcurrentHashMap<>();
 
+          @Override
           public Object invoke(Object proxy, Method method, Object[] args)
               throws Throwable {
             if (args == null || args.length == 0) {
@@ -308,9 +309,19 @@ public class Resources {
         switch (validation) {
         case BUNDLE_HAS_RESOURCE:
           if (!bundle.containsKey(key)) {
+            String suggested = null;
+            final BaseMessage annotation =
+                method.getAnnotation(BaseMessage.class);
+            if (annotation != null) {
+              final String message = annotation.value();
+              suggested = "; add the following line to "
+                  + bundle.getBaseBundleName() + ".properties:\n"
+                  + key + '=' + message + "\n";
+            }
             throw new AssertionError("key '" + key
                 + "' not found for resource '" + method.getName()
-                + "' in bundle '" + bundle + "'");
+                + "' in bundle '" + bundle + "'"
+                + (suggested == null ? "" : suggested));
           }
           break;
         case MESSAGE_SPECIFIED:
@@ -376,6 +387,8 @@ public class Resources {
                 + method.getName() + "' between message format elements "
                 + types + " and method parameters " + parameterTypeList);
           }
+          break;
+        default:
           break;
         }
       }
@@ -563,7 +576,7 @@ public class Resources {
     protected final PropertyAccessor accessor;
     protected final boolean hasDefault;
 
-    public Prop(PropertyAccessor accessor, Method method) {
+    protected Prop(PropertyAccessor accessor, Method method) {
       super(method);
       this.accessor = accessor;
       final Default resource = method.getAnnotation(Default.class);
@@ -742,38 +755,47 @@ public class Resources {
   enum EmptyPropertyAccessor implements PropertyAccessor {
     INSTANCE;
 
+    @Override
     public boolean isSet(Prop p) {
       return false;
     }
 
+    @Override
     public int intValue(IntProp p) {
       return p.defaultValue();
     }
 
+    @Override
     public int intValue(IntProp p, int defaultValue) {
       return defaultValue;
     }
 
+    @Override
     public String stringValue(StringProp p) {
       return p.defaultValue();
     }
 
+    @Override
     public String stringValue(StringProp p, String defaultValue) {
       return defaultValue;
     }
 
+    @Override
     public boolean booleanValue(BooleanProp p) {
       return p.defaultValue();
     }
 
+    @Override
     public boolean booleanValue(BooleanProp p, boolean defaultValue) {
       return defaultValue;
     }
 
+    @Override
     public double doubleValue(DoubleProp p) {
       return p.defaultValue();
     }
 
+    @Override
     public double doubleValue(DoubleProp p, double defaultValue) {
       return defaultValue;
     }
@@ -927,10 +949,12 @@ public class Resources {
           });
     }
 
+    @Override
     public Enumeration<String> getKeys() {
       return bundle.getKeys();
     }
 
+    @Override
     protected Object handleGetObject(String key) {
       return bundle.getObject(key);
     }
@@ -989,6 +1013,7 @@ public class Resources {
   enum BuiltinMethod {
     OBJECT_TO_STRING(Object.class, "toString");
 
+    @SuppressWarnings("ImmutableEnumChecker")
     public final Method method;
 
     BuiltinMethod(Class clazz, String methodName, Class... argumentTypes) {
@@ -1030,10 +1055,12 @@ public class Resources {
       this.properties = properties;
     }
 
+    @Override
     public boolean isSet(Prop p) {
       return properties.containsKey(p.key);
     }
 
+    @Override
     public int intValue(IntProp p) {
       final String s = properties.getProperty(p.key);
       if (s != null) {
@@ -1043,11 +1070,13 @@ public class Resources {
       return p.defaultValue;
     }
 
+    @Override
     public int intValue(IntProp p, int defaultValue) {
       final String s = properties.getProperty(p.key);
       return s == null ? defaultValue : Integer.parseInt(s, 10);
     }
 
+    @Override
     public String stringValue(StringProp p) {
       final String s = properties.getProperty(p.key);
       if (s != null) {
@@ -1057,11 +1086,13 @@ public class Resources {
       return p.defaultValue;
     }
 
+    @Override
     public String stringValue(StringProp p, String defaultValue) {
       final String s = properties.getProperty(p.key);
       return s == null ? defaultValue : s;
     }
 
+    @Override
     public boolean booleanValue(BooleanProp p) {
       final String s = properties.getProperty(p.key);
       if (s != null) {
@@ -1071,11 +1102,13 @@ public class Resources {
       return p.defaultValue;
     }
 
+    @Override
     public boolean booleanValue(BooleanProp p, boolean defaultValue) {
       final String s = properties.getProperty(p.key);
       return s == null ? defaultValue : Boolean.parseBoolean(s);
     }
 
+    @Override
     public double doubleValue(DoubleProp p) {
       final String s = properties.getProperty(p.key);
       if (s != null) {
@@ -1085,6 +1118,7 @@ public class Resources {
       return p.defaultValue;
     }
 
+    @Override
     public double doubleValue(DoubleProp p, double defaultValue) {
       final String s = properties.getProperty(p.key);
       return s == null ? defaultValue : Double.parseDouble(s);

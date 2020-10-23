@@ -56,19 +56,34 @@ public class FamilyOperandTypeChecker implements SqlSingleOperandTypeChecker,
 
   //~ Methods ----------------------------------------------------------------
 
-  public boolean isOptional(int i) {
+  @Override public boolean isOptional(int i) {
     return optional.test(i);
   }
 
-  public boolean checkSingleOperandType(
+  @Override public boolean checkSingleOperandType(
       SqlCallBinding callBinding,
       SqlNode node,
       int iFormalOperand,
       boolean throwOnFailure) {
-    SqlTypeFamily family = families.get(iFormalOperand);
-    if (family == SqlTypeFamily.ANY) {
+    final SqlTypeFamily family = families.get(iFormalOperand);
+    switch (family) {
+    case ANY:
+      final RelDataType type = SqlTypeUtil.deriveType(callBinding, node);
+      SqlTypeName typeName = type.getSqlTypeName();
+
+      if (typeName == SqlTypeName.CURSOR) {
+        // We do not allow CURSOR operands, even for ANY
+        if (throwOnFailure) {
+          throw callBinding.newValidationSignatureError();
+        }
+        return false;
+      }
+      // fall through
+    case IGNORE:
       // no need to check
       return true;
+    default:
+      break;
     }
     if (SqlUtil.isNullLiteral(node, false)) {
       if (callBinding.isTypeCoercionEnabled()) {
@@ -80,10 +95,7 @@ public class FamilyOperandTypeChecker implements SqlSingleOperandTypeChecker,
         return false;
       }
     }
-    RelDataType type =
-        callBinding.getValidator().deriveType(
-            callBinding.getScope(),
-            node);
+    RelDataType type = SqlTypeUtil.deriveType(callBinding, node);
     SqlTypeName typeName = type.getSqlTypeName();
 
     // Pass type checking for operators if it's of type 'ANY'.
@@ -100,7 +112,7 @@ public class FamilyOperandTypeChecker implements SqlSingleOperandTypeChecker,
     return true;
   }
 
-  public boolean checkOperandTypes(
+  @Override public boolean checkOperandTypes(
       SqlCallBinding callBinding,
       boolean throwOnFailure) {
     if (families.size() != callBinding.getOperandCount()) {
@@ -165,7 +177,7 @@ public class FamilyOperandTypeChecker implements SqlSingleOperandTypeChecker,
     return families.get(iFormalOperand);
   }
 
-  public SqlOperandCountRange getOperandCountRange() {
+  @Override public SqlOperandCountRange getOperandCountRange() {
     final int max = families.size();
     int min = max;
     while (min > 0 && optional.test(min - 1)) {
@@ -174,11 +186,11 @@ public class FamilyOperandTypeChecker implements SqlSingleOperandTypeChecker,
     return SqlOperandCountRanges.between(min, max);
   }
 
-  public String getAllowedSignatures(SqlOperator op, String opName) {
+  @Override public String getAllowedSignatures(SqlOperator op, String opName) {
     return SqlUtil.getAliasedSignature(op, opName, families);
   }
 
-  public Consistency getConsistency() {
+  @Override public Consistency getConsistency() {
     return Consistency.NONE;
   }
 }

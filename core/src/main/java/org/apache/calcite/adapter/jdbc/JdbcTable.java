@@ -54,8 +54,6 @@ import org.apache.calcite.sql.util.SqlString;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
-import com.google.common.collect.Lists;
-
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -92,7 +90,7 @@ public class JdbcTable extends AbstractQueryableTable
     this.jdbcTableType = Objects.requireNonNull(jdbcTableType);
   }
 
-  public String toString() {
+  @Override public String toString() {
     return "JdbcTable {" + jdbcTableName + "}";
   }
 
@@ -110,7 +108,7 @@ public class JdbcTable extends AbstractQueryableTable
     }
   }
 
-  public RelDataType getRowType(RelDataTypeFactory typeFactory) {
+  @Override public RelDataType getRowType(RelDataTypeFactory typeFactory) {
     if (protoRowType == null) {
       try {
         protoRowType =
@@ -130,7 +128,7 @@ public class JdbcTable extends AbstractQueryableTable
   private List<Pair<ColumnMetaData.Rep, Integer>> fieldClasses(
       final JavaTypeFactory typeFactory) {
     final RelDataType rowType = protoRowType.apply(typeFactory);
-    return Lists.transform(rowType.getFieldList(), f -> {
+    return Util.transform(rowType.getFieldList(), f -> {
       final RelDataType type = f.getType();
       final Class clazz = (Class) typeFactory.getJavaClass(type);
       final ColumnMetaData.Rep rep =
@@ -167,18 +165,18 @@ public class JdbcTable extends AbstractQueryableTable
     return new SqlIdentifier(names, SqlParserPos.ZERO);
   }
 
-  public RelNode toRel(RelOptTable.ToRelContext context,
+  @Override public RelNode toRel(RelOptTable.ToRelContext context,
       RelOptTable relOptTable) {
     return new JdbcTableScan(context.getCluster(), relOptTable, this,
         jdbcSchema.convention);
   }
 
-  public <T> Queryable<T> asQueryable(QueryProvider queryProvider,
+  @Override public <T> Queryable<T> asQueryable(QueryProvider queryProvider,
       SchemaPlus schema, String tableName) {
     return new JdbcTableQueryable<>(queryProvider, schema, tableName);
   }
 
-  public Enumerable<Object[]> scan(DataContext root) {
+  @Override public Enumerable<Object[]> scan(DataContext root) {
     final JavaTypeFactory typeFactory = root.getTypeFactory();
     final SqlString sql = generateSql();
     return ResultSetEnumerable.of(jdbcSchema.getDataSource(), sql.getSql(),
@@ -214,7 +212,7 @@ public class JdbcTable extends AbstractQueryableTable
       return "JdbcTableQueryable {table: " + tableName + "}";
     }
 
-    public Enumerator<T> enumerator() {
+    @Override public Enumerator<T> enumerator() {
       final JavaTypeFactory typeFactory =
           ((CalciteConnection) queryProvider).getTypeFactory();
       final SqlString sql = generateSql();

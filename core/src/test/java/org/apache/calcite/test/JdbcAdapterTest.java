@@ -16,6 +16,7 @@
  */
 package org.apache.calcite.test;
 
+import org.apache.calcite.config.CalciteConnectionProperty;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.test.CalciteAssert.AssertThat;
 import org.apache.calcite.test.CalciteAssert.DatabaseInstance;
@@ -84,11 +85,10 @@ class JdbcAdapterTest {
             + "FROM \"foodmart\".\"sales_fact_1998\"");
   }
 
-  /**
-   * Test case for
+  /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-3115">[CALCITE-3115]
    * Cannot add JdbcRules which have different JdbcConvention
-   * to same VolcanoPlanner's RuleSet.</a>*/
+   * to same VolcanoPlanner's RuleSet</a>. */
   @Test void testUnionPlan2() {
     CalciteAssert.model(JdbcTest.FOODMART_SCOTT_MODEL)
         .query("select \"store_name\" from \"foodmart\".\"store\" where \"store_id\" < 10\n"
@@ -137,13 +137,10 @@ class JdbcAdapterTest {
             + "where \"store_name\" in ('Store 1', 'Store 10', 'Store 11', 'Store 15', 'Store 16', 'Store 24', 'Store 3', 'Store 7')")
         .runs()
         .enable(CalciteAssert.DB == CalciteAssert.DatabaseInstance.HSQLDB)
-        .planHasSql(
-            "SELECT \"store_id\", \"store_name\"\n"
+        .planHasSql("SELECT \"store_id\", \"store_name\"\n"
             + "FROM \"foodmart\".\"store\"\n"
-            + "WHERE \"store_name\" = 'Store 1' OR \"store_name\" = 'Store 10'"
-                + " OR (\"store_name\" = 'Store 11' OR \"store_name\" = 'Store 15')"
-                + " OR (\"store_name\" = 'Store 16' OR \"store_name\" = 'Store 24'"
-                + " OR (\"store_name\" = 'Store 3' OR \"store_name\" = 'Store 7'))")
+            + "WHERE \"store_name\" IN ('Store 1', 'Store 10', 'Store 11',"
+            + " 'Store 15', 'Store 16', 'Store 24', 'Store 3', 'Store 7')")
         .returns("store_id=1; store_name=Store 1\n"
             + "store_id=3; store_name=Store 3\n"
             + "store_id=7; store_name=Store 7\n"
@@ -179,6 +176,7 @@ class JdbcAdapterTest {
 
   @Test void testPushDownSort() {
     CalciteAssert.model(JdbcTest.SCOTT_MODEL)
+        .with(CalciteConnectionProperty.TOPDOWN_OPT.camelName(), false)
         .query("select ename\n"
             + "from scott.emp\n"
             + "order by empno")
@@ -211,6 +209,7 @@ class JdbcAdapterTest {
         + "GROUP BY \"JOB\", \"DEPTNO\"\n"
         + "ORDER BY \"DEPTNO\" NULLS LAST, \"JOB\" NULLS LAST";
     CalciteAssert.model(JdbcTest.SCOTT_MODEL)
+        .with(CalciteConnectionProperty.TOPDOWN_OPT.camelName(), false)
         .query(sql)
         .explainContains(explain)
         .runs()

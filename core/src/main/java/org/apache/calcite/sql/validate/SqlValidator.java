@@ -206,7 +206,7 @@ public interface SqlValidator {
   void validateLiteral(SqlLiteral literal);
 
   /**
-   * Validates a {@link SqlIntervalQualifier}
+   * Validates a {@link SqlIntervalQualifier}.
    *
    * @param qualifier Interval qualifier
    */
@@ -301,7 +301,7 @@ public interface SqlValidator {
       SqlNodeList orderList, SqlValidatorScope scope);
 
   /**
-   * Validates a COLUMN_LIST parameter
+   * Validates a COLUMN_LIST parameter.
    *
    * @param function function containing COLUMN_LIST parameter
    * @param argTypes function arguments
@@ -384,7 +384,11 @@ public interface SqlValidator {
       SqlNode windowOrRef,
       SqlValidatorScope scope);
 
-  /** @deprecated Use {@link #resolveWindow(SqlNode, SqlValidatorScope)}, which
+  /**
+   * Converts a window specification or window name into a fully-resolved
+   * window specification.
+   *
+   * @deprecated Use {@link #resolveWindow(SqlNode, SqlValidatorScope)}, which
    * does not have the deprecated {@code populateBounds} parameter.
    *
    * @param populateBounds Whether to populate bounds. Doing so may alter the
@@ -460,18 +464,19 @@ public interface SqlValidator {
   /**
    * Saves the type of a {@link SqlNode}, now that it has been validated.
    *
+   * <p>This method is only for internal use. The validator should drive the
+   * type-derivation process, and store nodes' types when they have been derived.
+   *
    * @param node A SQL parse tree node, never null
    * @param type Its type; must not be null
-   * @deprecated This method should not be in the {@link SqlValidator}
-   * interface. The validator should drive the type-derivation process, and
-   * store nodes' types when they have been derived.
    */
+  @API(status = API.Status.INTERNAL, since = "1.24")
   void setValidatedNodeType(
       SqlNode node,
       RelDataType type);
 
   /**
-   * Removes a node from the set of validated nodes
+   * Removes a node from the set of validated nodes.
    *
    * @param node node to be removed
    */
@@ -786,9 +791,7 @@ public interface SqlValidator {
      * contain NULLS FIRST or NULLS LAST. */
     Config withDefaultNullCollation(NullCollation nullCollation);
 
-    /**
-     * Returns whether column reference expansion is enabled
-     */
+    /** Returns whether column reference expansion is enabled. */
     @ImmutableBeans.Property
     @ImmutableBeans.BooleanDefault(true)
     boolean columnReferenceExpansion();

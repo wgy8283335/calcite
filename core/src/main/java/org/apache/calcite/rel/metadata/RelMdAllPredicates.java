@@ -45,8 +45,6 @@ import org.apache.calcite.util.Util;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 
 import java.util.Collection;
@@ -79,7 +77,7 @@ public class RelMdAllPredicates
   public static final RelMetadataProvider SOURCE = ReflectiveRelMetadataProvider
       .reflectiveSource(BuiltInMethod.ALL_PREDICATES.method, new RelMdAllPredicates());
 
-  public MetadataDef<BuiltInMetadata.AllPredicates> getDef() {
+  @Override public MetadataDef<BuiltInMetadata.AllPredicates> getDef() {
     return BuiltInMetadata.AllPredicates.DEF;
   }
 
@@ -105,7 +103,12 @@ public class RelMdAllPredicates
   /**
    * Extract predicates for a table scan.
    */
-  public RelOptPredicateList getAllPredicates(TableScan table, RelMetadataQuery mq) {
+  public RelOptPredicateList getAllPredicates(TableScan scan, RelMetadataQuery mq) {
+    final BuiltInMetadata.AllPredicates.Handler handler =
+        scan.getTable().unwrap(BuiltInMetadata.AllPredicates.Handler.class);
+    if (handler != null) {
+      return handler.getAllPredicates(scan, mq);
+    }
     return RelOptPredicateList.EMPTY;
   }
 
@@ -134,7 +137,7 @@ public class RelMdAllPredicates
     final Set<RelDataTypeField> inputExtraFields = new LinkedHashSet<>();
     final RelOptUtil.InputFinder inputFinder = new RelOptUtil.InputFinder(inputExtraFields);
     pred.accept(inputFinder);
-    final ImmutableBitSet inputFieldsUsed = inputFinder.inputBitSet.build();
+    final ImmutableBitSet inputFieldsUsed = inputFinder.build();
 
     // Infer column origin expressions for given references
     final Map<RexInputRef, Set<RexNode>> mapping = new LinkedHashMap<>();
@@ -199,10 +202,10 @@ public class RelMdAllPredicates
           currentTablesMapping.put(rightRef,
               RelTableRef.of(rightRef.getTable(), shift + rightRef.getEntityNumber()));
         }
-        final List<RexNode> updatedPreds = Lists.newArrayList(
-            Iterables.transform(inputPreds.pulledUpPredicates,
+        final List<RexNode> updatedPreds =
+            Util.transform(inputPreds.pulledUpPredicates,
                 e -> RexUtil.swapTableReferences(rexBuilder, e,
-                    currentTablesMapping)));
+                    currentTablesMapping));
         newPreds = newPreds.union(rexBuilder,
             RelOptPredicateList.of(rexBuilder, updatedPreds));
       }
@@ -212,7 +215,7 @@ public class RelMdAllPredicates
     final Set<RelDataTypeField> inputExtraFields = new LinkedHashSet<>();
     final RelOptUtil.InputFinder inputFinder = new RelOptUtil.InputFinder(inputExtraFields);
     pred.accept(inputFinder);
-    final ImmutableBitSet inputFieldsUsed = inputFinder.inputBitSet.build();
+    final ImmutableBitSet inputFieldsUsed = inputFinder.build();
 
     // Infer column origin expressions for given references
     final Map<RexInputRef, Set<RexNode>> mapping = new LinkedHashMap<>();
@@ -298,10 +301,10 @@ public class RelMdAllPredicates
           qualifiedNamesToRefs.put(newRef.getQualifiedName(), newRef);
         }
         // Update preds
-        final List<RexNode> updatedPreds = Lists.newArrayList(
-            Iterables.transform(inputPreds.pulledUpPredicates,
+        final List<RexNode> updatedPreds =
+            Util.transform(inputPreds.pulledUpPredicates,
                 e -> RexUtil.swapTableReferences(rexBuilder, e,
-                    currentTablesMapping)));
+                    currentTablesMapping));
         newPreds = newPreds.union(rexBuilder,
             RelOptPredicateList.of(rexBuilder, updatedPreds));
       }

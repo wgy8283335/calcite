@@ -35,7 +35,6 @@ import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.runtime.Hook;
-import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.MultisetSqlType;
 import org.apache.calcite.tools.FrameworkConfig;
@@ -269,7 +268,7 @@ public class PigRelBuilder extends RelBuilder {
   }
 
   /**
-   * Makes a table scan operator for a given row type and names
+   * Makes a table scan operator for a given row type and names.
    *
    * @param rowType Row type
    * @param tableNames Table names
@@ -280,7 +279,7 @@ public class PigRelBuilder extends RelBuilder {
   }
 
   /**
-   * Makes a table scan operator for a given row type and names
+   * Makes a table scan operator for a given row type and names.
    *
    * @param rowType Row type
    * @param tableNames Table names
@@ -371,11 +370,6 @@ public class PigRelBuilder extends RelBuilder {
     return projectionExprs;
   }
 
-  public AggCall aggregateCall(SqlAggFunction aggFunction, String alias, RexNode... operands) {
-    return aggregateCall(aggFunction, false, false, false, null,
-        ImmutableList.of(), alias, ImmutableList.copyOf(operands));
-  }
-
   /**
    * Cogroups relations on top of the stack. The number of relations and the
    * group key are specified in groupKeys
@@ -384,9 +378,8 @@ public class PigRelBuilder extends RelBuilder {
    * @return This builder
    */
   public RelBuilder cogroup(Iterable<? extends GroupKey> groupKeys) {
-    @SuppressWarnings("unchecked") final List<GroupKeyImpl> groupKeyList =
-        ImmutableList.copyOf((Iterable) groupKeys);
-    final int groupCount = groupKeyList.get(0).nodes.size();
+    final List<GroupKey> groupKeyList = ImmutableList.copyOf(groupKeys);
+    final int groupCount = groupKeyList.get(0).groupKeyCount();
 
     // Pull out all relations needed for the group
     final int numRels = groupKeyList.size();
@@ -593,7 +586,7 @@ public class PigRelBuilder extends RelBuilder {
   }
 
   /**
-   * Save the store alias with the corresponding relational algebra node
+   * Saves the store alias with the corresponding relational algebra node.
    *
    * @param storeAlias alias of the Pig store operator
    * @return This builder
@@ -663,7 +656,7 @@ public class PigRelBuilder extends RelBuilder {
   /**
    * Context constructed during Pig-to-{@link RelNode} translation process.
    */
-  public class PigRelTranslationContext {
+  public static class PigRelTranslationContext {
     final Map<String, FuncSpec> pigUdfs = new HashMap<>();
   }
 }

@@ -91,7 +91,7 @@ public class ListTransientTable extends AbstractQueryableTable
     final AtomicBoolean cancelFlag = DataContext.Variable.CANCEL_FLAG.get(root);
 
     return new AbstractEnumerable<Object[]>() {
-      public Enumerator<Object[]> enumerator() {
+      @Override public Enumerator<Object[]> enumerator() {
         return new Enumerator<Object[]>() {
           private final List list = new ArrayList(rows);
           private int i = -1;
@@ -99,7 +99,7 @@ public class ListTransientTable extends AbstractQueryableTable
           // TODO cleaner way to handle non-array objects?
           @Override public Object[] current() {
             Object current = list.get(i);
-            return current.getClass().isArray()
+            return current != null && current.getClass().isArray()
                 ? (Object[]) current
                 : new Object[]{current};
           }
@@ -123,7 +123,7 @@ public class ListTransientTable extends AbstractQueryableTable
     };
   }
 
-  public Expression getExpression(SchemaPlus schema, String tableName,
+  @Override public Expression getExpression(SchemaPlus schema, String tableName,
                                   Class clazz) {
     return Schemas.tableExpression(schema, elementType, tableName, clazz);
   }
@@ -131,7 +131,7 @@ public class ListTransientTable extends AbstractQueryableTable
   @Override public <T> Queryable<T> asQueryable(QueryProvider queryProvider,
                                                 SchemaPlus schema, String tableName) {
     return new AbstractTableQueryable<T>(queryProvider, schema, this, tableName) {
-      public Enumerator<T> enumerator() {
+      @Override public Enumerator<T> enumerator() {
         //noinspection unchecked
         return (Enumerator<T>) Linq4j.enumerator(rows);
       }

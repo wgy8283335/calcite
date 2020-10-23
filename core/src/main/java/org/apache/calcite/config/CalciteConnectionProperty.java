@@ -78,8 +78,8 @@ public enum CalciteConnectionProperty implements ConnectionProperty {
   LEX("lex", Type.ENUM, Lex.ORACLE, false),
 
   /** Collection of built-in functions and operators. Valid values include
-   * "standard", "mysql", "oracle", "postgresql" and "spatial", and also
-   * comma-separated lists, for example "oracle,spatial". */
+   * "standard", "bigquery", "mysql", "oracle", "postgresql" and "spatial",
+   * and also comma-separated lists, for example "oracle,spatial". */
   FUN("fun", Type.STRING, "standard", true),
 
   /** How identifiers are quoted.
@@ -165,6 +165,7 @@ public enum CalciteConnectionProperty implements ConnectionProperty {
 
   private final String camelName;
   private final Type type;
+  @SuppressWarnings("ImmutableEnumChecker")
   private final Object defaultValue;
   private final boolean required;
   private final Class valueClass;
@@ -200,27 +201,27 @@ public enum CalciteConnectionProperty implements ConnectionProperty {
     }
   }
 
-  public String camelName() {
+  @Override public String camelName() {
     return camelName;
   }
 
-  public Object defaultValue() {
+  @Override public Object defaultValue() {
     return defaultValue;
   }
 
-  public Type type() {
+  @Override public Type type() {
     return type;
   }
 
-  public Class valueClass() {
+  @Override public Class valueClass() {
     return valueClass;
   }
 
-  public boolean required() {
+  @Override public boolean required() {
     return required;
   }
 
-  public PropEnv wrap(Properties properties) {
+  @Override public PropEnv wrap(Properties properties) {
     return new PropEnv(parse(properties, NAME_TO_PROPS), this);
   }
 }

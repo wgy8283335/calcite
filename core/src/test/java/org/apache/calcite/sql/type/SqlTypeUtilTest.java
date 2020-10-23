@@ -18,12 +18,23 @@ package org.apache.calcite.sql.type;
 
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.sql.SqlBasicTypeNameSpec;
+import org.apache.calcite.sql.SqlCollectionTypeNameSpec;
+import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlRowTypeNameSpec;
 
 import com.google.common.collect.ImmutableList;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import static org.apache.calcite.sql.type.SqlTypeUtil.areSameFamily;
+import static org.apache.calcite.sql.type.SqlTypeUtil.convertTypeToSpec;
+import static org.apache.calcite.sql.type.SqlTypeUtil.equalAsCollectionSansNullability;
+import static org.apache.calcite.sql.type.SqlTypeUtil.equalAsMapSansNullability;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -116,6 +127,68 @@ class SqlTypeUtilTest {
     // Recover the mappings to default.
     SqlTypeCoercionRule.THREAD_PROVIDERS.set(defaultRules);
   }
+
+  @Test void testEqualAsCollectionSansNullability() {
+    // case array
+    assertThat(
+        equalAsCollectionSansNullability(f.typeFactory, f.arrayBigInt, f.arrayBigIntNullable),
+        is(true));
+
+    // case multiset
+    assertThat(
+        equalAsCollectionSansNullability(f.typeFactory, f.multisetBigInt, f.multisetBigIntNullable),
+        is(true));
+
+    // multiset and array are not equal.
+    assertThat(
+        equalAsCollectionSansNullability(f.typeFactory, f.arrayBigInt, f.multisetBigInt),
+        is(false));
+  }
+
+  @Test void testEqualAsMapSansNullability() {
+    assertThat(
+        equalAsMapSansNullability(f.typeFactory, f.mapOfInt, f.mapOfIntNullable), is(true));
+  }
+
+  @Test void testConvertTypeToSpec() {
+    SqlBasicTypeNameSpec nullSpec =
+        (SqlBasicTypeNameSpec) convertTypeToSpec(f.sqlNull).getTypeNameSpec();
+    assertThat(nullSpec.getTypeName().getSimple(), is("NULL"));
+
+    SqlBasicTypeNameSpec basicSpec =
+        (SqlBasicTypeNameSpec) convertTypeToSpec(f.sqlBigInt).getTypeNameSpec();
+    assertThat(basicSpec.getTypeName().getSimple(), is("BIGINT"));
+
+    SqlCollectionTypeNameSpec arraySpec =
+        (SqlCollectionTypeNameSpec) convertTypeToSpec(f.arrayBigInt).getTypeNameSpec();
+    assertThat(arraySpec.getTypeName().getSimple(), is("ARRAY"));
+    assertThat(arraySpec.getElementTypeName().getTypeName().getSimple(), is("BIGINT"));
+
+    SqlCollectionTypeNameSpec multisetSpec =
+        (SqlCollectionTypeNameSpec) convertTypeToSpec(f.multisetBigInt).getTypeNameSpec();
+    assertThat(multisetSpec.getTypeName().getSimple(), is("MULTISET"));
+    assertThat(multisetSpec.getElementTypeName().getTypeName().getSimple(), is("BIGINT"));
+
+    SqlRowTypeNameSpec rowSpec =
+        (SqlRowTypeNameSpec) convertTypeToSpec(f.structOfInt).getTypeNameSpec();
+    List<String> fieldNames = rowSpec.getFieldNames()
+        .stream()
+        .map(SqlIdentifier::getSimple)
+        .collect(Collectors.toList());
+    List<String> fieldTypeNames = rowSpec.getFieldTypes()
+        .stream()
+        .map(f -> f.getTypeName().getSimple())
+        .collect(Collectors.toList());
+    assertThat(rowSpec.getTypeName().getSimple(), is("ROW"));
+    assertThat(fieldNames, is(Arrays.asList("i", "j")));
+    assertThat(fieldTypeNames, is(Arrays.asList("INTEGER", "INTEGER")));
+  }
+
+  @Test public void testGetMaxPrecisionScaleDecimal() {
+    RelDataType decimal = SqlTypeUtil.getMaxPrecisionScaleDecimal(f.typeFactory);
+    assertThat(decimal, is(f.typeFactory.createSqlType(SqlTypeName.DECIMAL, 19, 9)));
+  }
+
 
   private RelDataType struct(RelDataType...relDataTypes) {
     final RelDataTypeFactory.Builder builder = f.typeFactory.builder();

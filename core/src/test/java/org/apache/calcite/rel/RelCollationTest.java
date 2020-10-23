@@ -20,6 +20,8 @@ import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.Mappings;
 
+import com.google.common.collect.Lists;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -80,6 +82,70 @@ class RelCollationTest {
         is(false));
     assertThat(RelCollations.contains(collation1, Arrays.asList()),
         is(true));
+  }
+
+  /** Unit test for {@link RelCollations#collationsContainKeysOrderless(List, List)}. */
+  @Test void testCollationsContainKeysOrderless() {
+    final List<RelCollation> collations = Lists.newArrayList(collation(2, 3, 1));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(2, 2)), is(true));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(2, 3)), is(true));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(3, 2)), is(true));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(3, 2, 1)), is(true));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(3, 2, 1, 0)), is(false));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(2, 3, 0)), is(false));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(1)), is(false));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(3, 1)), is(false));
+    assertThat(
+        RelCollations.collationsContainKeysOrderless(
+        collations, Arrays.asList(0)), is(false));
+  }
+
+  /** Unit test for {@link RelCollations#keysContainCollationsOrderless(List, List)}. */
+  @Test void testKeysContainCollationsOrderless() {
+    final List<Integer> keys = Arrays.asList(2, 3, 1);
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(2, 2))), is(true));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(2, 3))), is(true));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(3, 2))), is(true));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(3, 2, 1))), is(true));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(3, 2, 1, 0))), is(false));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(2, 3, 0))), is(false));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(1))), is(true));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(3, 1))), is(true));
+    assertThat(
+        RelCollations.keysContainCollationsOrderless(
+            keys, Lists.newArrayList(collation(0))), is(false));
   }
 
   /**

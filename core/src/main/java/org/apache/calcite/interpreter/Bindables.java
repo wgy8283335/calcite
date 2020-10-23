@@ -27,7 +27,7 @@ import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelOptTable;
-import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.RelRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.InvalidRelException;
 import org.apache.calcite.rel.RelCollation;
@@ -45,7 +45,6 @@ import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.core.Match;
 import org.apache.calcite.rel.core.Minus;
 import org.apache.calcite.rel.core.Project;
-import org.apache.calcite.rel.core.RelFactories;
 import org.apache.calcite.rel.core.SetOp;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.core.TableScan;
@@ -85,7 +84,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
-import java.util.function.Predicate;
 
 /**
  * Utilities pertaining to {@link BindableRel} and {@link BindableConvention}.
@@ -94,45 +92,57 @@ public class Bindables {
   private Bindables() {}
 
   public static final RelOptRule BINDABLE_TABLE_SCAN_RULE =
-      new BindableTableScanRule(RelFactories.LOGICAL_BUILDER);
+      BindableTableScanRule.Config.DEFAULT.toRule();
 
   public static final RelOptRule BINDABLE_FILTER_RULE =
-      new BindableFilterRule(RelFactories.LOGICAL_BUILDER);
+      BindableFilterRule.DEFAULT_CONFIG.toRule(BindableFilterRule.class);
 
   public static final RelOptRule BINDABLE_PROJECT_RULE =
-      new BindableProjectRule(RelFactories.LOGICAL_BUILDER);
+      BindableProjectRule.DEFAULT_CONFIG.toRule(BindableProjectRule.class);
 
   public static final RelOptRule BINDABLE_SORT_RULE =
-      new BindableSortRule(RelFactories.LOGICAL_BUILDER);
+      BindableSortRule.DEFAULT_CONFIG.toRule(BindableSortRule.class);
 
   public static final RelOptRule BINDABLE_JOIN_RULE =
-      new BindableJoinRule(RelFactories.LOGICAL_BUILDER);
+      BindableJoinRule.DEFAULT_CONFIG.toRule(BindableJoinRule.class);
 
+  public static final RelOptRule BINDABLE_SET_OP_RULE =
+      BindableSetOpRule.DEFAULT_CONFIG.toRule(BindableSetOpRule.class);
+
+  // CHECKSTYLE: IGNORE 1
+  /** @deprecated Use {@link #BINDABLE_SET_OP_RULE}. */
+  @SuppressWarnings("MissingSummary")
   public static final RelOptRule BINDABLE_SETOP_RULE =
-      new BindableSetOpRule(RelFactories.LOGICAL_BUILDER);
+      BINDABLE_SET_OP_RULE;
 
   public static final RelOptRule BINDABLE_VALUES_RULE =
-      new BindableValuesRule(RelFactories.LOGICAL_BUILDER);
+      BindableValuesRule.DEFAULT_CONFIG.toRule(BindableValuesRule.class);
 
   public static final RelOptRule BINDABLE_AGGREGATE_RULE =
-      new BindableAggregateRule(RelFactories.LOGICAL_BUILDER);
+      BindableAggregateRule.DEFAULT_CONFIG.toRule(BindableAggregateRule.class);
 
   public static final RelOptRule BINDABLE_WINDOW_RULE =
-      new BindableWindowRule(RelFactories.LOGICAL_BUILDER);
+      BindableWindowRule.DEFAULT_CONFIG.toRule(BindableWindowRule.class);
 
   public static final RelOptRule BINDABLE_MATCH_RULE =
-      new BindableMatchRule(RelFactories.LOGICAL_BUILDER);
+      BindableMatchRule.DEFAULT_CONFIG.toRule(BindableMatchRule.class);
+
+  /** Rule that converts a relational expression from
+   * {@link org.apache.calcite.plan.Convention#NONE}
+   * to {@link org.apache.calcite.interpreter.BindableConvention}. */
+  public static final NoneToBindableConverterRule FROM_NONE_RULE =
+      NoneToBindableConverterRule.DEFAULT_CONFIG
+          .toRule(NoneToBindableConverterRule.class);
 
   /** All rules that convert logical relational expression to bindable. */
   public static final ImmutableList<RelOptRule> RULES =
-      ImmutableList.of(
-          NoneToBindableConverterRule.INSTANCE,
+      ImmutableList.of(FROM_NONE_RULE,
           BINDABLE_TABLE_SCAN_RULE,
           BINDABLE_FILTER_RULE,
           BINDABLE_PROJECT_RULE,
           BINDABLE_SORT_RULE,
           BINDABLE_JOIN_RULE,
-          BINDABLE_SETOP_RULE,
+          BINDABLE_SET_OP_RULE,
           BINDABLE_VALUES_RULE,
           BINDABLE_AGGREGATE_RULE,
           BINDABLE_WINDOW_RULE,
@@ -150,16 +160,20 @@ public class Bindables {
   }
 
   /** Rule that converts a {@link org.apache.calcite.rel.core.TableScan}
-   * to bindable convention. */
-  public static class BindableTableScanRule extends RelOptRule {
+   * to bindable convention.
+   *
+   * @see #BINDABLE_TABLE_SCAN_RULE */
+  public static class BindableTableScanRule
+      extends RelRule<BindableTableScanRule.Config> {
+    /** Called from Config. */
+    protected BindableTableScanRule(Config config) {
+      super(config);
+    }
 
-    /**
-     * Creates a BindableTableScanRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
+    @Deprecated // to be removed before 2.0
     public BindableTableScanRule(RelBuilderFactory relBuilderFactory) {
-      super(operand(LogicalTableScan.class, none()), relBuilderFactory, null);
+      this(Config.DEFAULT.withRelBuilderFactory(relBuilderFactory)
+          .as(Config.class));
     }
 
     @Override public void onMatch(RelOptRuleCall call) {
@@ -168,6 +182,18 @@ public class Bindables {
       if (BindableTableScan.canHandle(table)) {
         call.transformTo(
             BindableTableScan.create(scan.getCluster(), table));
+      }
+    }
+
+    /** Rule configuration. */
+    public interface Config extends RelRule.Config {
+      Config DEFAULT = EMPTY
+          .withOperandSupplier(b ->
+              b.operand(LogicalTableScan.class).noInputs())
+          .as(Config.class);
+
+      @Override default BindableTableScanRule toRule() {
+        return new BindableTableScanRule(this);
       }
     }
   }
@@ -226,7 +252,7 @@ public class Bindables {
       return builder.build();
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
@@ -263,31 +289,32 @@ public class Bindables {
           || table.unwrap(ProjectableFilterableTable.class) != null;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       throw new UnsupportedOperationException(); // TODO:
     }
   }
 
-  /** Rule that converts a {@link Filter} to bindable convention. */
+  /** Rule that converts a {@link Filter} to bindable convention.
+   *
+   * @see #BINDABLE_FILTER_RULE */
   public static class BindableFilterRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(LogicalFilter.class, f -> !f.containsOver(),
+            Convention.NONE, BindableConvention.INSTANCE,
+            "BindableFilterRule")
+        .withRuleFactory(BindableFilterRule::new);
 
-    /**
-     * Creates a BindableFilterRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableFilterRule(RelBuilderFactory relBuilderFactory) {
-      super(LogicalFilter.class,
-          (Predicate<LogicalFilter>) RelOptUtil::notContainsWindowedAgg,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableFilterRule");
+    /** Called from the Config. */
+    protected BindableFilterRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final LogicalFilter filter = (LogicalFilter) rel;
       return BindableFilter.create(
           convert(filter.getInput(),
@@ -318,20 +345,20 @@ public class Bindables {
       return new BindableFilter(cluster, traitSet, input, condition);
     }
 
-    public BindableFilter copy(RelTraitSet traitSet, RelNode input,
+    @Override public BindableFilter copy(RelTraitSet traitSet, RelNode input,
         RexNode condition) {
       return new BindableFilter(getCluster(), traitSet, input, condition);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new FilterNode(implementor.compiler, this);
     }
   }
@@ -339,22 +366,23 @@ public class Bindables {
   /**
    * Rule to convert a {@link org.apache.calcite.rel.logical.LogicalProject}
    * to a {@link BindableProject}.
+   *
+   * @see #BINDABLE_PROJECT_RULE
    */
   public static class BindableProjectRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(LogicalProject.class, p -> !p.containsOver(),
+            Convention.NONE, BindableConvention.INSTANCE,
+            "BindableProjectRule")
+        .withRuleFactory(BindableProjectRule::new);
 
-    /**
-     * Creates a BindableProjectRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableProjectRule(RelBuilderFactory relBuilderFactory) {
-      super(LogicalProject.class,
-          (Predicate<LogicalProject>) RelOptUtil::notContainsWindowedAgg,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableProjectRule");
+    /** Called from the Config. */
+    protected BindableProjectRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final LogicalProject project = (LogicalProject) rel;
       return new BindableProject(rel.getCluster(),
           rel.getTraitSet().replace(BindableConvention.INSTANCE),
@@ -375,21 +403,21 @@ public class Bindables {
       assert getConvention() instanceof BindableConvention;
     }
 
-    public BindableProject copy(RelTraitSet traitSet, RelNode input,
+    @Override public BindableProject copy(RelTraitSet traitSet, RelNode input,
         List<RexNode> projects, RelDataType rowType) {
       return new BindableProject(getCluster(), traitSet, input,
           projects, rowType);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new ProjectNode(implementor.compiler, this);
     }
   }
@@ -397,20 +425,22 @@ public class Bindables {
   /**
    * Rule to convert an {@link org.apache.calcite.rel.core.Sort} to a
    * {@link org.apache.calcite.interpreter.Bindables.BindableSort}.
+   *
+   * @see #BINDABLE_SORT_RULE
    */
   public static class BindableSortRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(Sort.class, Convention.NONE,
+            BindableConvention.INSTANCE, "BindableSortRule")
+        .withRuleFactory(BindableSortRule::new);
 
-    /**
-     * Creates a BindableSortRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableSortRule(RelBuilderFactory relBuilderFactory) {
-      super(Sort.class, (Predicate<RelNode>) r -> true, Convention.NONE,
-          BindableConvention.INSTANCE, relBuilderFactory, "BindableSortRule");
+    /** Called from the Config. */
+    protected BindableSortRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final Sort sort = (Sort) rel;
       final RelTraitSet traitSet =
           sort.getTraitSet().replace(BindableConvention.INSTANCE);
@@ -437,15 +467,15 @@ public class Bindables {
           offset, fetch);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new SortNode(implementor.compiler, this);
     }
   }
@@ -453,21 +483,22 @@ public class Bindables {
   /**
    * Rule to convert a {@link org.apache.calcite.rel.logical.LogicalJoin}
    * to a {@link BindableJoin}.
+   *
+   * @see #BINDABLE_JOIN_RULE
    */
   public static class BindableJoinRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(LogicalJoin.class, Convention.NONE,
+            BindableConvention.INSTANCE, "BindableJoinRule")
+        .withRuleFactory(BindableJoinRule::new);
 
-    /**
-     * Creates a BindableJoinRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableJoinRule(RelBuilderFactory relBuilderFactory) {
-      super(LogicalJoin.class, (Predicate<RelNode>) r -> true,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableJoinRule");
+    /** Called from the Config. */
+    protected BindableJoinRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final LogicalJoin join = (LogicalJoin) rel;
       final BindableConvention out = BindableConvention.INSTANCE;
       final RelTraitSet traitSet = join.getTraitSet().replace(out);
@@ -501,22 +532,22 @@ public class Bindables {
           CorrelationId.setOf(variablesStopped), joinType);
     }
 
-    public BindableJoin copy(RelTraitSet traitSet, RexNode conditionExpr,
+    @Override public BindableJoin copy(RelTraitSet traitSet, RexNode conditionExpr,
         RelNode left, RelNode right, JoinRelType joinType,
         boolean semiJoinDone) {
       return new BindableJoin(getCluster(), traitSet, left, right,
           conditionExpr, variablesSet, joinType);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new JoinNode(implementor.compiler, this);
     }
   }
@@ -524,21 +555,22 @@ public class Bindables {
   /**
    * Rule to convert an {@link SetOp} to a {@link BindableUnion}
    * or {@link BindableIntersect} or {@link BindableMinus}.
+   *
+   * @see #BINDABLE_SET_OP_RULE
    */
   public static class BindableSetOpRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(SetOp.class, Convention.NONE,
+            BindableConvention.INSTANCE, "BindableSetOpRule")
+        .withRuleFactory(BindableSetOpRule::new);
 
-    /**
-     * Creates a BindableSetOpRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableSetOpRule(RelBuilderFactory relBuilderFactory) {
-      super(SetOp.class, (Predicate<RelNode>) r -> true,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableSetOpRule");
+    /** Called from the Config. */
+    protected BindableSetOpRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final SetOp setOp = (SetOp) rel;
       final BindableConvention out = BindableConvention.INSTANCE;
       final RelTraitSet traitSet = setOp.getTraitSet().replace(out);
@@ -563,20 +595,20 @@ public class Bindables {
       super(cluster, traitSet, inputs, all);
     }
 
-    public BindableUnion copy(RelTraitSet traitSet, List<RelNode> inputs,
+    @Override public BindableUnion copy(RelTraitSet traitSet, List<RelNode> inputs,
         boolean all) {
       return new BindableUnion(getCluster(), traitSet, inputs, all);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new SetOpNode(implementor.compiler, this);
     }
   }
@@ -589,19 +621,20 @@ public class Bindables {
       super(cluster, traitSet, inputs, all);
     }
 
-    public BindableIntersect copy(RelTraitSet traitSet, List<RelNode> inputs, boolean all) {
+    @Override public BindableIntersect copy(RelTraitSet traitSet, List<RelNode> inputs,
+        boolean all) {
       return new BindableIntersect(getCluster(), traitSet, inputs, all);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new SetOpNode(implementor.compiler, this);
     }
   }
@@ -614,19 +647,19 @@ public class Bindables {
       super(cluster, traitSet, inputs, all);
     }
 
-    public BindableMinus copy(RelTraitSet traitSet, List<RelNode> inputs, boolean all) {
+    @Override public BindableMinus copy(RelTraitSet traitSet, List<RelNode> inputs, boolean all) {
       return new BindableMinus(getCluster(), traitSet, inputs, all);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new SetOpNode(implementor.compiler, this);
     }
   }
@@ -644,31 +677,32 @@ public class Bindables {
       return new BindableValues(getCluster(), rowType, tuples, traitSet);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new ValuesNode(implementor.compiler, this);
     }
   }
 
-  /** Rule that converts a {@link Values} to bindable convention. */
+  /** Rule that converts a {@link Values} to bindable convention.
+   *
+   * @see #BINDABLE_VALUES_RULE */
   public static class BindableValuesRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(LogicalValues.class, Convention.NONE,
+            BindableConvention.INSTANCE, "BindableValuesRule")
+        .withRuleFactory(BindableValuesRule::new);
 
-    /**
-     * Creates a BindableValuesRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableValuesRule(RelBuilderFactory relBuilderFactory) {
-      super(LogicalValues.class, (Predicate<RelNode>) r -> true,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableValuesRule");
+    /** Called from the Config. */
+    protected BindableValuesRule(Config config) {
+      super(config);
     }
 
     @Override public RelNode convert(RelNode rel) {
@@ -730,34 +764,35 @@ public class Bindables {
       }
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new AggregateNode(implementor.compiler, this);
     }
   }
 
-  /** Rule that converts an {@link Aggregate} to bindable convention. */
+  /** Rule that converts an {@link Aggregate} to bindable convention.
+   *
+   * @see #BINDABLE_AGGREGATE_RULE */
   public static class BindableAggregateRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(LogicalAggregate.class, Convention.NONE,
+            BindableConvention.INSTANCE, "BindableAggregateRule")
+        .withRuleFactory(BindableAggregateRule::new);
 
-    /**
-     * Creates a BindableAggregateRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableAggregateRule(RelBuilderFactory relBuilderFactory) {
-      super(LogicalAggregate.class, (Predicate<RelNode>) r -> true,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableAggregateRule");
+    /** Called from the Config. */
+    protected BindableAggregateRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final LogicalAggregate agg = (LogicalAggregate) rel;
       final RelTraitSet traitSet =
           agg.getTraitSet().replace(BindableConvention.INSTANCE);
@@ -792,37 +827,36 @@ public class Bindables {
           .multiplyBy(BindableConvention.COST_MULTIPLIER);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new WindowNode(implementor.compiler, this);
     }
   }
 
-  /**
-   * Rule to convert a {@link org.apache.calcite.rel.logical.LogicalWindow}
+  /** Rule to convert a {@link org.apache.calcite.rel.logical.LogicalWindow}
    * to a {@link BindableWindow}.
-   */
+   *
+   * @see #BINDABLE_WINDOW_RULE */
   public static class BindableWindowRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(LogicalWindow.class, Convention.NONE,
+            BindableConvention.INSTANCE, "BindableWindowRule")
+        .withRuleFactory(BindableWindowRule::new);
 
-    /**
-     * Creates a BindableWindowRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableWindowRule(RelBuilderFactory relBuilderFactory) {
-      super(LogicalWindow.class, (Predicate<RelNode>) r -> true,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableWindowRule");
+    /** Called from the Config. */
+    protected BindableWindowRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final LogicalWindow winAgg = (LogicalWindow) rel;
       final RelTraitSet traitSet =
           winAgg.getTraitSet().replace(BindableConvention.INSTANCE);
@@ -838,7 +872,7 @@ public class Bindables {
   /** Implementation of {@link org.apache.calcite.rel.core.Match}
    * in bindable convention. */
   public static class BindableMatch extends Match implements BindableRel {
-    /** Creates a BindableMatch. */
+    /** Singleton instance of BindableMatch. */
     BindableMatch(RelOptCluster cluster, RelTraitSet traitSet, RelNode input,
         RelDataType rowType, RexNode pattern, boolean strictStart,
         boolean strictEnd, Map<String, RexNode> patternDefinitions,
@@ -857,15 +891,15 @@ public class Bindables {
           subsets, allRows, partitionKeys, orderKeys, interval);
     }
 
-    public Class<Object[]> getElementType() {
+    @Override public Class<Object[]> getElementType() {
       return Object[].class;
     }
 
-    public Enumerable<Object[]> bind(DataContext dataContext) {
+    @Override public Enumerable<Object[]> bind(DataContext dataContext) {
       return help(dataContext, this);
     }
 
-    public Node implement(InterpreterImplementor implementor) {
+    @Override public Node implement(InterpreterImplementor implementor) {
       return new MatchNode(implementor.compiler, this);
     }
   }
@@ -873,21 +907,22 @@ public class Bindables {
   /**
    * Rule to convert a {@link org.apache.calcite.rel.logical.LogicalMatch}
    * to a {@link BindableMatch}.
+   *
+   * @see #BINDABLE_MATCH_RULE
    */
   public static class BindableMatchRule extends ConverterRule {
+    /** Default configuration. */
+    public static final Config DEFAULT_CONFIG = Config.INSTANCE
+        .withConversion(LogicalMatch.class, Convention.NONE,
+            BindableConvention.INSTANCE, "BindableMatchRule")
+        .withRuleFactory(BindableMatchRule::new);
 
-    /**
-     * Creates a BindableMatchRule.
-     *
-     * @param relBuilderFactory Builder for relational expressions
-     */
-    public BindableMatchRule(RelBuilderFactory relBuilderFactory) {
-      super(LogicalMatch.class, (Predicate<RelNode>) r -> true,
-          Convention.NONE, BindableConvention.INSTANCE, relBuilderFactory,
-          "BindableMatchRule");
+    /** Called from the Config. */
+    protected BindableMatchRule(Config config) {
+      super(config);
     }
 
-    public RelNode convert(RelNode rel) {
+    @Override public RelNode convert(RelNode rel) {
       final LogicalMatch match = (LogicalMatch) rel;
       final RelTraitSet traitSet =
           match.getTraitSet().replace(BindableConvention.INSTANCE);

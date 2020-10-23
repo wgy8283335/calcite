@@ -47,7 +47,7 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOperatorTable;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
-import org.apache.calcite.sql.util.ChainedSqlOperatorTable;
+import org.apache.calcite.sql.util.SqlOperatorTables;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql2rel.RelDecorrelator;
 import org.apache.calcite.sql2rel.SqlRexConvertletTable;
@@ -58,12 +58,12 @@ import org.apache.calcite.tools.Program;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.ValidationException;
 import org.apache.calcite.util.Pair;
+import org.apache.calcite.util.Util;
 
 import com.google.common.collect.ImmutableList;
 
 import java.io.Reader;
 import java.util.List;
-import java.util.Properties;
 
 /** Implementation of {@link org.apache.calcite.tools.Planner}. */
 public class PlannerImpl implements Planner, ViewExpander {
@@ -84,6 +84,7 @@ public class PlannerImpl implements Planner, ViewExpander {
   private State state;
 
   // set in STATE_1_RESET
+  @SuppressWarnings("unused")
   private boolean open;
 
   // set in STATE_2_READY
@@ -118,13 +119,11 @@ public class PlannerImpl implements Planner, ViewExpander {
     reset();
   }
 
-  /** Gets a user defined config and appends default connection values */
+  /** Gets a user-defined config and appends default connection values. */
   private CalciteConnectionConfig connConfig() {
-    CalciteConnectionConfigImpl config =
-        context.unwrap(CalciteConnectionConfigImpl.class);
-    if (config == null) {
-      config = new CalciteConnectionConfigImpl(new Properties());
-    }
+    CalciteConnectionConfigImpl config = Util.first(
+        context.unwrap(CalciteConnectionConfigImpl.class),
+        CalciteConnectionConfig.DEFAULT);
     if (!config.isSet(CalciteConnectionProperty.CASE_SENSITIVE)) {
       config = config.set(CalciteConnectionProperty.CASE_SENSITIVE,
           String.valueOf(parserConfig.caseSensitive()));
@@ -148,17 +147,17 @@ public class PlannerImpl implements Planner, ViewExpander {
     state.from(this);
   }
 
-  public RelTraitSet getEmptyTraitSet() {
+  @Override public RelTraitSet getEmptyTraitSet() {
     return planner.emptyTraitSet();
   }
 
-  public void close() {
+  @Override public void close() {
     open = false;
     typeFactory = null;
     state = State.STATE_0_CLOSED;
   }
 
-  public void reset() {
+  @Override public void reset() {
     ensure(State.STATE_0_CLOSED);
     open = true;
     state = State.STATE_1_RESET;
@@ -168,6 +167,9 @@ public class PlannerImpl implements Planner, ViewExpander {
     switch (state) {
     case STATE_0_CLOSED:
       reset();
+      break;
+    default:
+      break;
     }
     ensure(State.STATE_1_RESET);
 
@@ -197,11 +199,14 @@ public class PlannerImpl implements Planner, ViewExpander {
     }
   }
 
-  public SqlNode parse(final Reader reader) throws SqlParseException {
+  @Override public SqlNode parse(final Reader reader) throws SqlParseException {
     switch (state) {
     case STATE_0_CLOSED:
     case STATE_1_RESET:
       ready();
+      break;
+    default:
+      break;
     }
     ensure(State.STATE_2_READY);
     SqlParser parser = SqlParser.create(reader, parserConfig);
@@ -210,7 +215,7 @@ public class PlannerImpl implements Planner, ViewExpander {
     return sqlNode;
   }
 
-  public SqlNode validate(SqlNode sqlNode) throws ValidationException {
+  @Override public SqlNode validate(SqlNode sqlNode) throws ValidationException {
     ensure(State.STATE_3_PARSED);
     this.validator = createSqlValidator(createCatalogReader());
     try {
@@ -222,7 +227,7 @@ public class PlannerImpl implements Planner, ViewExpander {
     return validatedSqlNode;
   }
 
-  public Pair<SqlNode, RelDataType> validateAndGetType(SqlNode sqlNode)
+  @Override public Pair<SqlNode, RelDataType> validateAndGetType(SqlNode sqlNode)
       throws ValidationException {
     final SqlNode validatedNode = this.validate(sqlNode);
     final RelDataType type =
@@ -231,19 +236,17 @@ public class PlannerImpl implements Planner, ViewExpander {
   }
 
   @SuppressWarnings("deprecation")
-  public final RelNode convert(SqlNode sql) {
+  @Override public final RelNode convert(SqlNode sql) {
     return rel(sql).rel;
   }
 
-  public RelRoot rel(SqlNode sql) {
+  @Override public RelRoot rel(SqlNode sql) {
     ensure(State.STATE_4_VALIDATED);
     assert validatedSqlNode != null;
     final RexBuilder rexBuilder = createRexBuilder();
     final RelOptCluster cluster = RelOptCluster.create(planner, rexBuilder);
-    final SqlToRelConverter.Config config = SqlToRelConverter.configBuilder()
-        .withConfig(sqlToRelConverterConfig)
-        .withTrimUnusedFields(false)
-        .build();
+    final SqlToRelConverter.Config config =
+        sqlToRelConverterConfig.withTrimUnusedFields(false);
     final SqlToRelConverter sqlToRelConverter =
         new SqlToRelConverter(this, validator,
             createCatalogReader(), cluster, convertletTable, config);
@@ -258,14 +261,15 @@ public class PlannerImpl implements Planner, ViewExpander {
     return root;
   }
 
+  // CHECKSTYLE: IGNORE 2
   /** @deprecated Now {@link PlannerImpl} implements {@link ViewExpander}
    * directly. */
-  @Deprecated
+  @Deprecated // to be removed before 2.0
   public class ViewExpanderImpl implements ViewExpander {
     ViewExpanderImpl() {
     }
 
-    public RelRoot expandView(RelDataType rowType, String queryString,
+    @Override public RelRoot expandView(RelDataType rowType, String queryString,
         List<String> schemaPath, List<String> viewPath) {
       return PlannerImpl.this.expandView(rowType, queryString, schemaPath,
           viewPath);
@@ -291,11 +295,8 @@ public class PlannerImpl implements Planner, ViewExpander {
 
     final RexBuilder rexBuilder = createRexBuilder();
     final RelOptCluster cluster = RelOptCluster.create(planner, rexBuilder);
-    final SqlToRelConverter.Config config = SqlToRelConverter
-        .configBuilder()
-        .withConfig(sqlToRelConverterConfig)
-        .withTrimUnusedFields(false)
-        .build();
+    final SqlToRelConverter.Config config =
+        sqlToRelConverterConfig.withTrimUnusedFields(false);
     final SqlToRelConverter sqlToRelConverter =
         new SqlToRelConverter(this, validator,
             catalogReader, cluster, convertletTable, config);
@@ -322,7 +323,7 @@ public class PlannerImpl implements Planner, ViewExpander {
 
   private SqlValidator createSqlValidator(CalciteCatalogReader catalogReader) {
     final SqlOperatorTable opTab =
-        ChainedSqlOperatorTable.of(operatorTable, catalogReader);
+        SqlOperatorTables.chain(operatorTable, catalogReader);
     return new CalciteSqlValidator(opTab,
         catalogReader,
         typeFactory,
@@ -347,11 +348,11 @@ public class PlannerImpl implements Planner, ViewExpander {
     return new RexBuilder(typeFactory);
   }
 
-  public JavaTypeFactory getTypeFactory() {
+  @Override public JavaTypeFactory getTypeFactory() {
     return typeFactory;
   }
 
-  public RelNode transform(int ruleSetIndex, RelTraitSet requiredOutputTraits,
+  @Override public RelNode transform(int ruleSetIndex, RelTraitSet requiredOutputTraits,
       RelNode rel) {
     ensure(State.STATE_5_CONVERTED);
     rel.getCluster().setMetadataProvider(

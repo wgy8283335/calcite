@@ -17,55 +17,67 @@
 package org.apache.calcite.sql;
 
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.sql.type.SqlOperandCountRanges;
-import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlValidator;
+
+import com.google.common.collect.ImmutableList;
 
 /**
  * SqlSessionTableFunction implements an operator for per-key sessionization. It allows
  * four parameters:
- * 1. a table.
- * 2. a descriptor to provide a watermarked column name from the input table.
- * 3. a descriptor to provide a column as key, on which sessionization will be applied.
- * 4. an interval parameter to specify a inactive activity gap to break sessions.
+ *
+ * <ol>
+ *   <li>table as data source</li>
+ *   <li>a descriptor to provide a watermarked column name from the input table</li>
+ *   <li>a descriptor to provide a column as key, on which sessionization will be applied,
+ *   optional</li>
+ *   <li>an interval parameter to specify a inactive activity gap to break sessions</li>
+ * </ol>
  */
 public class SqlSessionTableFunction extends SqlWindowTableFunction {
   public SqlSessionTableFunction() {
-    super(SqlKind.SESSION.name());
+    super(SqlKind.SESSION.name(), new OperandMetadataImpl());
   }
 
-  @Override public SqlOperandCountRange getOperandCountRange() {
-    return SqlOperandCountRanges.of(4);
-  }
+  /** Operand type checker for SESSION. */
+  private static class OperandMetadataImpl extends AbstractOperandMetadata {
+    OperandMetadataImpl() {
+      super(ImmutableList.of(PARAM_DATA, PARAM_TIMECOL, PARAM_KEY, PARAM_SIZE),
+          3);
+    }
 
-  @Override public boolean checkOperandTypes(SqlCallBinding callBinding,
-      boolean throwOnFailure) {
-    final SqlNode operand0 = callBinding.operand(0);
-    final SqlValidator validator = callBinding.getValidator();
-    final RelDataType type = validator.getValidatedNodeType(operand0);
-    if (type.getSqlTypeName() != SqlTypeName.ROW) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    final SqlNode operand1 = callBinding.operand(1);
-    if (operand1.getKind() != SqlKind.DESCRIPTOR) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    validateColumnNames(validator, type.getFieldNames(), ((SqlCall) operand1).getOperandList());
-    final SqlNode operand2 = callBinding.operand(2);
-    if (operand2.getKind() != SqlKind.DESCRIPTOR) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    validateColumnNames(validator, type.getFieldNames(), ((SqlCall) operand2).getOperandList());
-    final RelDataType type3 = validator.getValidatedNodeType(callBinding.operand(3));
-    if (!SqlTypeUtil.isInterval(type3)) {
-      return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
-    }
-    return true;
-  }
+    @Override public boolean checkOperandTypes(SqlCallBinding callBinding,
+        boolean throwOnFailure) {
+      if (!checkTableAndDescriptorOperands(callBinding, 1)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      if (!checkTimeColumnDescriptorOperand(callBinding, 1)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
 
-  @Override public String getAllowedSignatures(String opNameToUse) {
-    return getName() + "(TABLE table_name, DESCRIPTOR(col), "
-        + "DESCRIPTOR(col), datetime interval)";
+      final SqlValidator validator = callBinding.getValidator();
+      final SqlNode operand2 = callBinding.operand(2);
+      final RelDataType type2 = validator.getValidatedNodeType(operand2);
+      if (operand2.getKind() == SqlKind.DESCRIPTOR) {
+        final SqlNode operand0 = callBinding.operand(0);
+        final RelDataType type = validator.getValidatedNodeType(operand0);
+        validateColumnNames(
+            validator, type.getFieldNames(), ((SqlCall) operand2).getOperandList());
+      } else if (!SqlTypeUtil.isInterval(type2)) {
+        return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+      }
+      if (callBinding.getOperandCount() > 3) {
+        final RelDataType type3 = validator.getValidatedNodeType(callBinding.operand(3));
+        if (!SqlTypeUtil.isInterval(type3)) {
+          return throwValidationSignatureErrorOrReturnFalse(callBinding, throwOnFailure);
+        }
+      }
+      return true;
+    }
+
+    @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+      return opName + "(TABLE table_name, DESCRIPTOR(timecol), "
+          + "DESCRIPTOR(key) optional, datetime interval)";
+    }
   }
 }

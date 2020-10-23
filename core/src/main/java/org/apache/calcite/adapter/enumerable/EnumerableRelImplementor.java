@@ -133,6 +133,9 @@ public class EnumerableRelImplementor extends JavaRelImplementor {
         result = new EnumerableRel.Result(bb.toBlock(), result.physType,
             JavaRowFormat.SCALAR);
       }
+      break;
+    default:
+      break;
     }
 
     final List<MemberDeclaration> memberDeclarations = new ArrayList<>();
@@ -472,7 +475,7 @@ public class EnumerableRelImplementor extends JavaRelImplementor {
         block, physType, ((PhysTypeImpl) physType).format);
   }
 
-  public SqlConformance getConformance() {
+  @Override public SqlConformance getConformance() {
     return (SqlConformance) map.getOrDefault("_conformance",
         SqlConformanceEnum.DEFAULT);
   }

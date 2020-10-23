@@ -16,6 +16,7 @@
  */
 package org.apache.calcite.sql.validate;
 
+
 /**
  * Enumeration of valid SQL compatibility modes.
  *
@@ -66,6 +67,25 @@ public interface SqlConformance {
    * dialects. This is enabled for the Babel parser, disabled otherwise.
    */
   boolean isLiberal();
+
+  /**
+   * Whether this dialect allows character literals as column aliases.
+   *
+   * <p>For example,
+   *
+   * <blockquote><pre>
+   *   SELECT empno, sal + comm AS 'remuneration'
+   *   FROM Emp</pre></blockquote>
+   *
+   * <p>Among the built-in conformance levels, true in
+   * {@link SqlConformanceEnum#BABEL},
+   * {@link SqlConformanceEnum#BIG_QUERY},
+   * {@link SqlConformanceEnum#LENIENT},
+   * {@link SqlConformanceEnum#MYSQL_5},
+   * {@link SqlConformanceEnum#SQL_SERVER_2008};
+   * false otherwise.
+   */
+  boolean allowCharLiteralAlias();
 
   /**
    * Whether to allow aliases from the {@code SELECT} clause to be used as
@@ -165,6 +185,28 @@ public interface SqlConformance {
    * false otherwise.
    */
   boolean isFromRequired();
+
+  /**
+   * Whether to split a quoted table name. If true, {@code `x.y.z`} is parsed as
+   * if the user had written {@code `x`.`y`.`z`}.
+   *
+   * <p>Among the built-in conformance levels, true in
+   * {@link SqlConformanceEnum#BIG_QUERY};
+   * false otherwise.
+   */
+  boolean splitQuotedTableName();
+
+  /**
+   * Whether to allow hyphens in an unquoted table name.
+   *
+   * <p>If true, {@code SELECT * FROM foo-bar.baz-buzz} is valid, and is parsed
+   * as if the user had written {@code SELECT * FROM `foo-bar`.`baz-buzz`}.
+   *
+   * <p>Among the built-in conformance levels, true in
+   * {@link SqlConformanceEnum#BIG_QUERY};
+   * false otherwise.
+   */
+  boolean allowHyphenInUnquotedTableName();
 
   /**
    * Whether the bang-equal token != is allowed as an alternative to &lt;&gt; in

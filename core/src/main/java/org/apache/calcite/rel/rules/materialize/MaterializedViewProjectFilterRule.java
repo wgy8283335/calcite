@@ -24,26 +24,48 @@ import org.apache.calcite.rel.core.RelFactories;
 import org.apache.calcite.tools.RelBuilderFactory;
 
 /** Rule that matches Project on Filter. */
-public class MaterializedViewProjectFilterRule extends MaterializedViewJoinRule {
+public class MaterializedViewProjectFilterRule
+    extends MaterializedViewJoinRule<MaterializedViewProjectFilterRule.Config> {
 
-  public static final MaterializedViewProjectFilterRule INSTANCE =
-      new MaterializedViewProjectFilterRule(RelFactories.LOGICAL_BUILDER,
-          true, null, true);
+  private MaterializedViewProjectFilterRule(Config config) {
+    super(config);
+  }
 
+  @Deprecated // to be removed before 2.0
   public MaterializedViewProjectFilterRule(RelBuilderFactory relBuilderFactory,
       boolean generateUnionRewriting, HepProgram unionRewritingPullProgram,
       boolean fastBailOut) {
-    super(
-        operand(Project.class,
-            operand(Filter.class, any())),
-        relBuilderFactory,
-        "MaterializedViewJoinRule(Project-Filter)",
-        generateUnionRewriting, unionRewritingPullProgram, fastBailOut);
+    this(Config.DEFAULT
+        .withRelBuilderFactory(relBuilderFactory)
+        .as(Config.class)
+        .withGenerateUnionRewriting(generateUnionRewriting)
+        .withUnionRewritingPullProgram(unionRewritingPullProgram)
+        .withFastBailOut(fastBailOut)
+        .as(Config.class));
   }
 
   @Override public void onMatch(RelOptRuleCall call) {
     final Project project = call.rel(0);
     final Filter filter = call.rel(1);
     perform(call, project, filter);
+  }
+
+  /** Rule configuration. */
+  public interface Config extends MaterializedViewRule.Config {
+    Config DEFAULT = EMPTY.as(Config.class)
+        .withRelBuilderFactory(RelFactories.LOGICAL_BUILDER)
+        .withOperandSupplier(b0 ->
+            b0.operand(Project.class).oneInput(b1 ->
+                b1.operand(Filter.class).anyInputs()))
+        .withDescription("MaterializedViewJoinRule(Project-Filter)")
+        .as(Config.class)
+        .withGenerateUnionRewriting(true)
+        .withUnionRewritingPullProgram(null)
+        .withFastBailOut(true)
+        .as(Config.class);
+
+    @Override default MaterializedViewProjectFilterRule toRule() {
+      return new MaterializedViewProjectFilterRule(this);
+    }
   }
 }

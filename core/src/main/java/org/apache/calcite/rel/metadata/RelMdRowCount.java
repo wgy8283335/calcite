@@ -53,7 +53,7 @@ public class RelMdRowCount
 
   //~ Methods ----------------------------------------------------------------
 
-  public MetadataDef<BuiltInMetadata.RowCount> getDef() {
+  @Override public MetadataDef<BuiltInMetadata.RowCount> getDef() {
     return BuiltInMetadata.RowCount.DEF;
   }
 
@@ -67,6 +67,7 @@ public class RelMdRowCount
     return rel.estimateRowCount(mq);
   }
 
+  @SuppressWarnings("CatchAndPrintStackTrace")
   public Double getRowCount(RelSubset subset, RelMetadataQuery mq) {
     if (!Bug.CALCITE_1048_FIXED) {
       return mq.getRowCount(Util.first(subset.getBest(), subset.getOriginal()));

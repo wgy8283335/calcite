@@ -24,15 +24,17 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 
 import java.time.Duration;
-import java.util.LinkedList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Enumerator to read data from {@link Consumer},
  * and converted into SQL rows with {@link KafkaRowConverter}.
- * @param <K>: type for Kafka message key,
+ *
+ * @param <K> Type for Kafka message key,
  *           refer to {@link ConsumerConfig#KEY_DESERIALIZER_CLASS_CONFIG};
- * @param <V>: type for Kafka message value,
+ * @param <V> Type for Kafka message value,
  *           refer to {@link ConsumerConfig#VALUE_DESERIALIZER_CLASS_CONFIG};
  */
 public class KafkaMessageEnumerator<K, V> implements Enumerator<Object[]> {
@@ -41,7 +43,7 @@ public class KafkaMessageEnumerator<K, V> implements Enumerator<Object[]> {
   private final AtomicBoolean cancelFlag;
 
   //runtime
-  private final LinkedList<ConsumerRecord<K, V>> bufferedRecords = new LinkedList<>();
+  private final Deque<ConsumerRecord<K, V>> bufferedRecords = new ArrayDeque<>();
   private ConsumerRecord<K, V> curRecord;
 
   KafkaMessageEnumerator(final Consumer consumer,

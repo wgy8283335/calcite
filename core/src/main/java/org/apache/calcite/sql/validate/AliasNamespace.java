@@ -17,6 +17,7 @@
 package org.apache.calcite.sql.validate;
 
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactoryImpl;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlIdentifier;
@@ -63,7 +64,7 @@ public class AliasNamespace extends AbstractNamespace {
 
   //~ Methods ----------------------------------------------------------------
 
-  protected RelDataType validateImpl(RelDataType targetRowType) {
+  @Override protected RelDataType validateImpl(RelDataType targetRowType) {
     final List<String> nameList = new ArrayList<>();
     final List<SqlNode> operands = call.getOperandList();
     final SqlValidatorNamespace childNs =
@@ -91,9 +92,18 @@ public class AliasNamespace extends AbstractNamespace {
     for (RelDataTypeField field : rowType.getFieldList()) {
       typeList.add(field.getType());
     }
-    return validator.getTypeFactory().createStructType(
+    final RelDataType aliasedType = validator.getTypeFactory().createStructType(
+        rowType.getStructKind(),
         typeList,
         nameList);
+
+    // As per suggestion in CALCITE-4085, JavaType has its special nullability handling.
+    if (rowType instanceof RelDataTypeFactoryImpl.JavaType) {
+      return aliasedType;
+    } else {
+      return validator.getTypeFactory()
+          .createTypeWithNullability(aliasedType, rowType.isNullable());
+    }
   }
 
   private String getString(RelDataType rowType) {
@@ -111,11 +121,11 @@ public class AliasNamespace extends AbstractNamespace {
     return buf.toString();
   }
 
-  public SqlNode getNode() {
+  @Override public SqlNode getNode() {
     return call;
   }
 
-  public String translate(String name) {
+  @Override public String translate(String name) {
     final RelDataType underlyingRowType =
         validator.getValidatedNodeType(call.operand(0));
     int i = 0;

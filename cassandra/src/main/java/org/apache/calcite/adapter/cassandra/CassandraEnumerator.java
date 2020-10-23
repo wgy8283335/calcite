@@ -57,11 +57,11 @@ class CassandraEnumerator implements Enumerator<Object> {
     this.fieldTypes = protoRowType.apply(typeFactory).getFieldList();
   }
 
-  /** Produce the next row from the results
+  /** Produces the next row from the results.
    *
    * @return A new row from the results
    */
-  public Object current() {
+  @Override public Object current() {
     if (fieldTypes.size() == 1) {
       // If we just have one field, produce it directly
       return currentRowField(0);
@@ -103,7 +103,9 @@ class CassandraEnumerator implements Enumerator<Object> {
       return ((LocalDate) obj).getMillisSinceEpoch()
           / DateTimeUtils.MILLIS_PER_DAY;
     } else if (obj instanceof Date) {
-      return ((Date) obj).toInstant().toEpochMilli();
+      @SuppressWarnings("JdkObsolete")
+      long milli = ((Date) obj).toInstant().toEpochMilli();
+      return milli;
     } else if (obj instanceof LinkedHashSet) {
       // MULTISET is handled as an array
       return ((LinkedHashSet) obj).toArray();
@@ -123,7 +125,7 @@ class CassandraEnumerator implements Enumerator<Object> {
     return obj;
   }
 
-  public boolean moveNext() {
+  @Override public boolean moveNext() {
     if (iterator.hasNext()) {
       current = iterator.next();
       return true;
@@ -132,11 +134,11 @@ class CassandraEnumerator implements Enumerator<Object> {
     }
   }
 
-  public void reset() {
+  @Override public void reset() {
     throw new UnsupportedOperationException();
   }
 
-  public void close() {
+  @Override public void close() {
     // Nothing to do here
   }
 }

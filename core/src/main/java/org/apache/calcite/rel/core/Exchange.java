@@ -67,7 +67,7 @@ public abstract class Exchange extends SingleRel {
   /**
    * Creates an Exchange by parsing serialized output.
    */
-  public Exchange(RelInput input) {
+  protected Exchange(RelInput input) {
     this(input.getCluster(), input.getTraitSet().plus(input.getCollation()),
         input.getInput(),
         RelDistributionTraitDef.INSTANCE.canonize(input.getDistribution()));
@@ -98,7 +98,7 @@ public abstract class Exchange extends SingleRel {
         Util.nLogN(rowCount) * bytesPerRow, rowCount, 0);
   }
 
-  public RelWriter explainTerms(RelWriter pw) {
+  @Override public RelWriter explainTerms(RelWriter pw) {
     return super.explainTerms(pw)
         .item("distribution", distribution);
   }

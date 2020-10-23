@@ -18,7 +18,7 @@ package org.apache.calcite.test;
 
 import org.apache.calcite.adapter.enumerable.EnumerableTableScan;
 import org.apache.calcite.adapter.java.ReflectiveSchema;
-import org.apache.calcite.config.CalciteConnectionConfigImpl;
+import org.apache.calcite.config.CalciteConnectionConfig;
 import org.apache.calcite.jdbc.CalciteSchema;
 import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
 import org.apache.calcite.materialize.MaterializationService;
@@ -56,7 +56,6 @@ import com.google.common.collect.ImmutableList;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Properties;
 import java.util.function.Function;
 
 /**
@@ -109,7 +108,7 @@ public abstract class AbstractMaterializedViewTest {
       for (RelNode sub: substitutes) {
         substituteMessages.append(RelOptUtil.toString(sub)).append("\n");
       }
-      throw new AssertionError("Materialized view failed to be matched by optmized results:\n"
+      throw new AssertionError("Materialized view failed to be matched by optimized results:\n"
           + substituteMessages.toString());
     }
   }
@@ -125,7 +124,7 @@ public abstract class AbstractMaterializedViewTest {
       return;
     }
     final StringBuilder errMsgBuilder = new StringBuilder();
-    errMsgBuilder.append("Optmization succeeds out of expectation: ");
+    errMsgBuilder.append("Optimization succeeds out of expectation: ");
     for (RelNode res: results) {
       errMsgBuilder.append(RelOptUtil.toString(res)).append("\n");
     }
@@ -179,16 +178,16 @@ public abstract class AbstractMaterializedViewTest {
     final CalciteCatalogReader catalogReader = new CalciteCatalogReader(
         CalciteSchema.from(rootSchema),
         CalciteSchema.from(defaultSchema).path(null),
-        new JavaTypeFactoryImpl(), new CalciteConnectionConfigImpl(new Properties()));
+        new JavaTypeFactoryImpl(),
+        CalciteConnectionConfig.DEFAULT);
 
     final SqlValidator validator = new ValidatorForTest(SqlStdOperatorTable.instance(),
         catalogReader, new JavaTypeFactoryImpl(), SqlConformanceEnum.DEFAULT);
     final SqlNode validated = validator.validate(parsed);
-    final SqlToRelConverter.Config config = SqlToRelConverter.configBuilder()
+    final SqlToRelConverter.Config config = SqlToRelConverter.config()
         .withTrimUnusedFields(true)
         .withExpand(true)
-        .withDecorrelationEnabled(true)
-        .build();
+        .withDecorrelationEnabled(true);
     final SqlToRelConverter converter = new SqlToRelConverter(
         (rowType, queryString, schemaPath, viewPath) -> {
           throw new UnsupportedOperationException("cannot expand view");

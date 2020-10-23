@@ -103,7 +103,7 @@ public abstract class SqlAggFunction extends SqlFunction implements Context {
       boolean requiresOver,
       Optionality requiresGroupOrder) {
     super(name, sqlIdentifier, kind, returnTypeInference, operandTypeInference,
-        operandTypeChecker, null, funcType);
+        operandTypeChecker, funcType);
     this.requiresOrder = requiresOrder;
     this.requiresOver = requiresOver;
     this.requiresGroupOrder = Objects.requireNonNull(requiresGroupOrder);
@@ -111,7 +111,7 @@ public abstract class SqlAggFunction extends SqlFunction implements Context {
 
   //~ Methods ----------------------------------------------------------------
 
-  public <T> T unwrap(Class<T> clazz) {
+  @Override public <T> T unwrap(Class<T> clazz) {
     return clazz.isInstance(this) ? clazz.cast(this) : null;
   }
 

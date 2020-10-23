@@ -51,6 +51,7 @@ import org.apache.calcite.linq4j.function.Predicate2;
 import org.apache.calcite.linq4j.tree.FunctionExpression;
 import org.apache.calcite.linq4j.tree.Primitive;
 import org.apache.calcite.linq4j.tree.Types;
+import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.AllPredicates;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.Collation;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.ColumnOrigin;
@@ -60,6 +61,7 @@ import org.apache.calcite.rel.metadata.BuiltInMetadata.DistinctRowCount;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.Distribution;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.ExplainVisibility;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.ExpressionLineage;
+import org.apache.calcite.rel.metadata.BuiltInMetadata.LowerBoundCost;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.MaxRowCount;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.Memory;
 import org.apache.calcite.rel.metadata.BuiltInMetadata.MinRowCount;
@@ -83,6 +85,7 @@ import org.apache.calcite.runtime.Bindable;
 import org.apache.calcite.runtime.CompressionFunctions;
 import org.apache.calcite.runtime.Enumerables;
 import org.apache.calcite.runtime.FlatLists;
+import org.apache.calcite.runtime.GeoFunctions;
 import org.apache.calcite.runtime.JsonFunctions;
 import org.apache.calcite.runtime.Matcher;
 import org.apache.calcite.runtime.Pattern;
@@ -112,6 +115,7 @@ import com.google.common.collect.ImmutableMap;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -212,6 +216,8 @@ public enum BuiltInMethod {
   WHERE2(ExtendedEnumerable.class, "where", Predicate2.class),
   DISTINCT(ExtendedEnumerable.class, "distinct"),
   DISTINCT2(ExtendedEnumerable.class, "distinct", EqualityComparer.class),
+  SORTED_GROUP_BY(ExtendedEnumerable.class, "sortedGroupBy", Function1.class,
+      Function0.class, Function2.class, Function2.class, Comparator.class),
   GROUP_BY(ExtendedEnumerable.class, "groupBy", Function1.class),
   GROUP_BY2(ExtendedEnumerable.class, "groupBy", Function1.class,
       Function0.class, Function2.class, Function2.class),
@@ -222,6 +228,8 @@ public enum BuiltInMethod {
       Function2.class, Function1.class),
   ORDER_BY(ExtendedEnumerable.class, "orderBy", Function1.class,
       Comparator.class),
+  ORDER_BY_WITH_FETCH_AND_OFFSET(EnumerableDefaults.class, "orderBy", Enumerable.class,
+      Function1.class, Comparator.class, int.class, int.class),
   UNION(ExtendedEnumerable.class, "union", Enumerable.class),
   CONCAT(ExtendedEnumerable.class, "concat", Enumerable.class),
   REPEAT_UNION(EnumerableDefaults.class, "repeatUnion", Enumerable.class,
@@ -236,6 +244,8 @@ public enum BuiltInMethod {
   EMPTY_ENUMERABLE(Linq4j.class, "emptyEnumerable"),
   NULLS_COMPARATOR(Functions.class, "nullsComparator", boolean.class,
       boolean.class),
+  NULLS_COMPARATOR2(Functions.class, "nullsComparator", boolean.class,
+      boolean.class, Comparator.class),
   ARRAY_COMPARER(Functions.class, "arrayComparer"),
   FUNCTION0_APPLY(Function0.class, "apply"),
   FUNCTION1_APPLY(Function1.class, "apply", Object.class),
@@ -243,6 +253,7 @@ public enum BuiltInMethod {
   ARRAY(SqlFunctions.class, "array", Object[].class),
   FLAT_PRODUCT(SqlFunctions.class, "flatProduct", int[].class, boolean.class,
       FlatProductInputType[].class),
+  FLAT_LIST(SqlFunctions.class, "flatList"),
   LIST_N(FlatLists.class, "copyOf", Comparable[].class),
   LIST2(FlatLists.class, "of", Object.class, Object.class),
   LIST3(FlatLists.class, "of", Object.class, Object.class, Object.class),
@@ -365,6 +376,7 @@ public enum BuiltInMethod {
   IS_JSON_OBJECT(JsonFunctions.class, "isJsonObject", String.class),
   IS_JSON_ARRAY(JsonFunctions.class, "isJsonArray", String.class),
   IS_JSON_SCALAR(JsonFunctions.class, "isJsonScalar", String.class),
+  ST_GEOM_FROM_TEXT(GeoFunctions.class, "ST_GeomFromText", String.class),
   INITCAP(SqlFunctions.class, "initcap", String.class),
   SUBSTRING(SqlFunctions.class, "substring", String.class, int.class,
       int.class),
@@ -501,6 +513,11 @@ public enum BuiltInMethod {
       Comparable.class),
   COMPARE_NULLS_LAST(Utilities.class, "compareNullsLast", Comparable.class,
       Comparable.class),
+  COMPARE2(Utilities.class, "compare", Comparable.class, Comparable.class, Comparator.class),
+  COMPARE_NULLS_FIRST2(Utilities.class, "compareNullsFirst", Comparable.class,
+      Comparable.class, Comparator.class),
+  COMPARE_NULLS_LAST2(Utilities.class, "compareNullsLast", Comparable.class,
+      Comparable.class, Comparator.class),
   ROUND_LONG(SqlFunctions.class, "round", long.class, long.class),
   ROUND_INT(SqlFunctions.class, "round", int.class, int.class),
   DATE_TO_INT(SqlFunctions.class, "toInt", java.util.Date.class),
@@ -543,6 +560,8 @@ public enum BuiltInMethod {
   AVERAGE_COLUMN_SIZES(Size.class, "averageColumnSizes"),
   IS_PHASE_TRANSITION(Parallelism.class, "isPhaseTransition"),
   SPLIT_COUNT(Parallelism.class, "splitCount"),
+  LOWER_BOUND_COST(LowerBoundCost.class, "getLowerBoundCost",
+      VolcanoPlanner.class),
   MEMORY(Memory.class, "memory"),
   CUMULATIVE_MEMORY_WITHIN_PHASE(Memory.class, "cumulativeMemoryWithinPhase"),
   CUMULATIVE_MEMORY_WITHIN_PHASE_SPLIT(Memory.class,
@@ -594,12 +613,16 @@ public enum BuiltInMethod {
       "singleGroupResultSelector", Function1.class),
   TUMBLING(EnumUtils.class, "tumbling", Enumerable.class, Function1.class),
   HOPPING(EnumUtils.class, "hopping", Enumerator.class, int.class, long.class,
-      long.class),
+      long.class, long.class),
   SESSIONIZATION(EnumUtils.class, "sessionize", Enumerator.class, int.class, int.class,
-      long.class);
+      long.class),
+  BIG_DECIMAL_NEGATE(BigDecimal.class, "negate");
 
+  @SuppressWarnings("ImmutableEnumChecker")
   public final Method method;
+  @SuppressWarnings("ImmutableEnumChecker")
   public final Constructor constructor;
+  @SuppressWarnings("ImmutableEnumChecker")
   public final Field field;
 
   public static final ImmutableMap<Method, BuiltInMethod> MAP;

@@ -55,6 +55,7 @@ import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.rex.RexVisitor;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlAggFunction;
+import org.apache.calcite.sql.fun.SqlLibraryOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
@@ -65,15 +66,12 @@ import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.Mappings;
-import org.apache.calcite.util.trace.CalciteTrace;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
-
-import org.slf4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -82,9 +80,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeMap;
 
 import static org.apache.calcite.rex.RexUtil.andNot;
@@ -125,8 +123,6 @@ import static org.apache.calcite.rex.RexUtil.removeAll;
  */
 public class SubstitutionVisitor {
   private static final boolean DEBUG = CalciteSystemProperty.DEBUG.value();
-
-  private static final Logger LOGGER = CalciteTrace.getPlannerTracer();
 
   protected static final ImmutableList<UnifyRule> DEFAULT_RULES =
       ImmutableList.of(
@@ -203,7 +199,7 @@ public class SubstitutionVisitor {
     final List<MutableRel> allNodes = new ArrayList<>();
     final MutableRelVisitor visitor =
         new MutableRelVisitor() {
-          public void visit(MutableRel node) {
+          @Override public void visit(MutableRel node) {
             parents.add(node.getParent());
             allNodes.add(node);
             super.visit(node);
@@ -250,7 +246,7 @@ public class SubstitutionVisitor {
    * <li>residue: y = 2</li>
    * </ul>
    *
-   * <p>Note that residue {@code x &gt; 0 AND y = 2} would also satisfy the
+   * <p>Note that residue {@code x > 0 AND y = 2} would also satisfy the
    * relation {@code condition = target AND residue} but is stronger than
    * necessary, so we prefer {@code y = 2}.</p>
    *
@@ -299,7 +295,7 @@ public class SubstitutionVisitor {
       return z;
     }
 
-    if (isEquivalent(rexBuilder, condition2, target2)) {
+    if (isEquivalent(condition2, target2)) {
       return rexBuilder.makeLiteral(true);
     }
 
@@ -309,7 +305,7 @@ public class SubstitutionVisitor {
           ImmutableList.of(condition2, target2));
       RexNode r = canonizeNode(rexBuilder,
           simplify.simplifyUnknownAsFalse(x2));
-      if (!r.isAlwaysFalse() && isEquivalent(rexBuilder, condition2, r)) {
+      if (!r.isAlwaysFalse() && isEquivalent(condition2, r)) {
         List<RexNode> conjs = RelOptUtil.conjunctions(r);
         for (RexNode e : RelOptUtil.conjunctions(target2)) {
           removeAll(conjs, e);
@@ -329,7 +325,7 @@ public class SubstitutionVisitor {
     case AND:
     case OR: {
       RexCall call = (RexCall) condition;
-      SortedMap<String, RexNode> newOperands = new TreeMap<>();
+      NavigableMap<String, RexNode> newOperands = new TreeMap<>();
       for (RexNode operand : call.operands) {
         operand = canonizeNode(rexBuilder, operand);
         newOperands.put(operand.toString(), operand);
@@ -355,6 +351,10 @@ public class SubstitutionVisitor {
         return call;
       }
       return RexUtil.invert(rexBuilder, call);
+    }
+    case SEARCH: {
+      final RexNode e = RexUtil.expandSearch(rexBuilder, null, condition);
+      return canonizeNode(rexBuilder, e);
     }
     case PLUS:
     case TIMES: {
@@ -395,7 +395,7 @@ public class SubstitutionVisitor {
     return null;
   }
 
-  private static boolean isEquivalent(RexBuilder rexBuilder, RexNode condition, RexNode target) {
+  private static boolean isEquivalent(RexNode condition, RexNode target) {
     // Example:
     //  e: x = 1 AND y = 2 AND z = 3 AND NOT (x = 1 AND y = 2)
     //  disjunctions: {x = 1, y = 2, z = 3}
@@ -434,6 +434,9 @@ public class SubstitutionVisitor {
         if (!RexLiteral.booleanValue(disjunction)) {
           return false;
         }
+        break;
+      default:
+        break;
       }
     }
     for (RexNode disjunction : notDisjunctions) {
@@ -442,6 +445,9 @@ public class SubstitutionVisitor {
         if (RexLiteral.booleanValue(disjunction)) {
           return false;
         }
+        break;
+      default:
+        break;
       }
     }
     // If one of the not-disjunctions is a disjunction that is wholly
@@ -498,6 +504,7 @@ public class SubstitutionVisitor {
    * are both a qualified match for replacement R, is R join B, R join R,
    * A join R.
    */
+  @SuppressWarnings("MixedMutabilityReturnType")
   public List<RelNode> go(RelNode replacement_) {
     List<List<Replacement>> matches = go(MutableRels.toMutable(replacement_));
     if (matches.isEmpty()) {
@@ -984,7 +991,7 @@ public class SubstitutionVisitor {
 
   /** Abstract base class for implementing {@link UnifyRule}. */
   protected abstract static class AbstractUnifyRule extends UnifyRule {
-    public AbstractUnifyRule(Operand queryOperand, Operand targetOperand,
+    protected AbstractUnifyRule(Operand queryOperand, Operand targetOperand,
         int slotCount) {
       super(slotCount, queryOperand, targetOperand);
       //noinspection AssertWithSideEffects
@@ -1040,7 +1047,7 @@ public class SubstitutionVisitor {
       super(any(MutableRel.class), any(MutableRel.class), 0);
     }
 
-    public UnifyResult apply(UnifyRuleCall call) {
+    @Override public UnifyResult apply(UnifyRuleCall call) {
       if (call.query.equals(call.target)) {
         return call.result(call.target);
       }
@@ -1113,7 +1120,7 @@ public class SubstitutionVisitor {
           operand(MutableCalc.class, target(0)), 1);
     }
 
-    public UnifyResult apply(UnifyRuleCall call) {
+    @Override public UnifyResult apply(UnifyRuleCall call) {
       final MutableCalc query = (MutableCalc) call.query;
       final Pair<RexNode, List<RexNode>> queryExplained = explainCalc(query);
       final RexNode queryCond = queryExplained.left;
@@ -1545,7 +1552,7 @@ public class SubstitutionVisitor {
           operand(MutableAggregate.class, target(0)), 1);
     }
 
-    public UnifyResult apply(UnifyRuleCall call) {
+    @Override public UnifyResult apply(UnifyRuleCall call) {
       final MutableAggregate query = (MutableAggregate) call.query;
       final MutableAggregate target = (MutableAggregate) call.target;
       assert query != target;
@@ -1581,7 +1588,7 @@ public class SubstitutionVisitor {
       super(any(MutableUnion.class), any(MutableUnion.class), 0);
     }
 
-    public UnifyResult apply(UnifyRuleCall call) {
+    @Override public UnifyResult apply(UnifyRuleCall call) {
       final MutableUnion query = (MutableUnion) call.query;
       final MutableUnion target = (MutableUnion) call.target;
       final List<MutableRel> queryInputs = new ArrayList<>(query.getInputs());
@@ -1608,7 +1615,7 @@ public class SubstitutionVisitor {
       super(any(MutableUnion.class), any(MutableUnion.class), 0);
     }
 
-    public UnifyResult apply(UnifyRuleCall call) {
+    @Override public UnifyResult apply(UnifyRuleCall call) {
       return setOpApply(call);
     }
   }
@@ -1626,7 +1633,7 @@ public class SubstitutionVisitor {
       super(any(MutableIntersect.class), any(MutableIntersect.class), 0);
     }
 
-    public UnifyResult apply(UnifyRuleCall call) {
+    @Override public UnifyResult apply(UnifyRuleCall call) {
       final MutableIntersect query = (MutableIntersect) call.query;
       final MutableIntersect target = (MutableIntersect) call.target;
       final List<MutableRel> queryInputs = new ArrayList<>(query.getInputs());
@@ -1653,7 +1660,7 @@ public class SubstitutionVisitor {
       super(any(MutableIntersect.class), any(MutableIntersect.class), 0);
     }
 
-    public UnifyResult apply(UnifyRuleCall call) {
+    @Override public UnifyResult apply(UnifyRuleCall call) {
       return setOpApply(call);
     }
   }
@@ -1804,7 +1811,7 @@ public class SubstitutionVisitor {
   private static boolean implies(
       RelOptCluster cluster, RexNode cond0, RexNode cond1, RelDataType rowType) {
     RexExecutorImpl rexImpl =
-        (RexExecutorImpl) (cluster.getPlanner().getExecutor());
+        (RexExecutorImpl) cluster.getPlanner().getExecutor();
     RexImplicationChecker rexImplicationChecker =
         new RexImplicationChecker(cluster.getRexBuilder(), rexImpl, rowType);
     return rexImplicationChecker.implies(cond0, cond1);
@@ -1856,11 +1863,42 @@ public class SubstitutionVisitor {
       RexNode targetCond, MutableAggregate target) {
     MutableRel result;
     RexBuilder rexBuilder = query.cluster.getRexBuilder();
-    if (query.groupSets.equals(target.groupSets)) {
+    Map<RexNode, RexNode> targetCondConstantMap =
+        RexUtil.predicateConstants(RexNode.class, rexBuilder, RelOptUtil.conjunctions(targetCond));
+    // Collect rexInputRef in constant filter condition.
+    Set<Integer> constantCondInputRefs = new HashSet<>();
+    List<Integer> targetGroupByIndexList = target.groupSet.asList();
+    RexShuttle rexShuttle = new RexShuttle() {
+      @Override public RexNode visitInputRef(RexInputRef inputRef) {
+        constantCondInputRefs.add(targetGroupByIndexList.get(inputRef.getIndex()));
+        return super.visitInputRef(inputRef);
+      }
+    };
+    for (RexNode rexNode : targetCondConstantMap.keySet()) {
+      rexNode.accept(rexShuttle);
+    }
+    Set<Integer> compenGroupSet = null;
+    // Calc the missing group list of query, do not cover grouping sets cases.
+    if (query.groupSets.size() == 1 && target.groupSets.size() == 1) {
+      if (target.groupSet.contains(query.groupSet)) {
+        compenGroupSet = target.groupSets.get(0).except(query.groupSets.get(0)).asSet();
+      }
+    }
+    // If query and target have the same group list,
+    // or query has constant filter for missing columns in group by list.
+    if (query.groupSets.equals(target.groupSets)
+        || (compenGroupSet != null && constantCondInputRefs.containsAll(compenGroupSet))) {
+      int projOffset = 0;
+      if (!query.groupSets.equals(target.groupSets)) {
+        projOffset = compenGroupSet.size();
+      }
       // Same level of aggregation. Generate a project.
       final List<Integer> projects = new ArrayList<>();
       final int groupCount = query.groupSet.cardinality();
-      for (int i = 0; i < groupCount; i++) {
+      final List<Integer> targetGroupList = target.groupSet.asList();
+      for (Integer inputIndex : query.groupSet.asList()) {
+        // Use the index in target group by.
+        int i = targetGroupList.indexOf(inputIndex);
         projects.add(i);
       }
       for (AggregateCall aggregateCall : query.aggCalls) {
@@ -1868,7 +1906,7 @@ public class SubstitutionVisitor {
         if (i < 0) {
           return null;
         }
-        projects.add(groupCount + i);
+        projects.add(groupCount + i +  projOffset);
       }
 
       List<RexNode> compenProjs = MutableRels.createProjectExprs(target, projects);
@@ -1935,6 +1973,12 @@ public class SubstitutionVisitor {
     if (aggregation == SqlStdOperatorTable.SUM
         || aggregation == SqlStdOperatorTable.MIN
         || aggregation == SqlStdOperatorTable.MAX
+        || aggregation == SqlStdOperatorTable.SOME
+        || aggregation == SqlStdOperatorTable.EVERY
+        || aggregation == SqlLibraryOperators.BOOL_AND
+        || aggregation == SqlLibraryOperators.BOOL_OR
+        || aggregation == SqlLibraryOperators.LOGICAL_AND
+        || aggregation == SqlLibraryOperators.LOGICAL_OR
         || aggregation == SqlStdOperatorTable.SUM0
         || aggregation == SqlStdOperatorTable.ANY_VALUE) {
       return aggregation;

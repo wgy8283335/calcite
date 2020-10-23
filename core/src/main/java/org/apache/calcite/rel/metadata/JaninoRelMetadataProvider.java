@@ -181,12 +181,12 @@ public class JaninoRelMetadataProvider implements RelMetadataProvider {
     return 109 + provider.hashCode();
   }
 
-  public <M extends Metadata> UnboundMetadata<M> apply(
+  @Override public <M extends Metadata> UnboundMetadata<M> apply(
       Class<? extends RelNode> relClass, Class<? extends M> metadataClass) {
     throw new UnsupportedOperationException();
   }
 
-  public <M extends Metadata> Multimap<Method, MetadataHandler<M>>
+  @Override public <M extends Metadata> Multimap<Method, MetadataHandler<M>>
       handlers(MetadataDef<M> def) {
     return provider.handlers(def);
   }
@@ -400,13 +400,8 @@ public class JaninoRelMetadataProvider implements RelMetadataProvider {
   /** Returns e.g. ", ignoreNulls". */
   private static StringBuilder safeArgList(StringBuilder buff, Method method) {
     for (Ord<Class<?>> t : Ord.zip(method.getParameterTypes())) {
-      if (Primitive.is(t.e)) {
+      if (Primitive.is(t.e) || RexNode.class.isAssignableFrom(t.e)) {
         buff.append(", a").append(t.i);
-      } else if (RexNode.class.isAssignableFrom(t.e)) {
-        // For RexNode, convert to string, because equals does not look deep.
-        //   a1 == null ? "" : a1.toString()
-        buff.append(", a").append(t.i).append(" == null ? \"\" : a")
-            .append(t.i).append(".toString()");
       } else {
         buff.append(", ") .append(NullSentinel.class.getName())
             .append(".mask(a").append(t.i).append(")");
@@ -473,8 +468,7 @@ public class JaninoRelMetadataProvider implements RelMetadataProvider {
       //noinspection unchecked
       return (H) HANDLERS.get(key);
     } catch (UncheckedExecutionException | ExecutionException e) {
-      Util.throwIfUnchecked(e.getCause());
-      throw new RuntimeException(e.getCause());
+      throw Util.throwAsRuntime(Util.causeOrSelf(e));
     }
   }
 

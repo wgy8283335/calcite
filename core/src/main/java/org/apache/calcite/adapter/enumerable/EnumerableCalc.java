@@ -39,6 +39,7 @@ import org.apache.calcite.rel.metadata.RelMdCollation;
 import org.apache.calcite.rel.metadata.RelMdDistribution;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexUtil;
@@ -107,7 +108,7 @@ public class EnumerableCalc extends Calc implements EnumerableRel {
     return new EnumerableCalc(getCluster(), traitSet, child, program);
   }
 
-  public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
+  @Override public Result implement(EnumerableRelImplementor implementor, Prefer pref) {
     final JavaTypeFactory typeFactory = implementor.getTypeFactory();
     final BlockBuilder builder = new BlockBuilder();
     final EnumerableRel child = (EnumerableRel) getInput();
@@ -265,7 +266,25 @@ public class EnumerableCalc extends Calc implements EnumerableRel {
     return implementor.result(physType, builder.toBlock());
   }
 
-  public RexProgram getProgram() {
+  @Override public Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(
+      final RelTraitSet required) {
+    final List<RexNode> exps = Util.transform(program.getProjectList(),
+        program::expandLocalRef);
+
+    return EnumerableTraitsUtils.passThroughTraitsForProject(required, exps,
+        input.getRowType(), input.getCluster().getTypeFactory(), traitSet);
+  }
+
+  @Override public Pair<RelTraitSet, List<RelTraitSet>> deriveTraits(
+      final RelTraitSet childTraits, final int childId) {
+    final List<RexNode> exps = Util.transform(program.getProjectList(),
+        program::expandLocalRef);
+
+    return EnumerableTraitsUtils.deriveTraitsForProject(childTraits, childId, exps,
+        input.getRowType(), input.getCluster().getTypeFactory(), traitSet);
+  }
+
+  @Override public RexProgram getProgram() {
     return program;
   }
 }

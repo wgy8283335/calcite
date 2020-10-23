@@ -25,10 +25,14 @@ import com.github.vlsi.gradle.properties.dsl.props
 import com.github.vlsi.gradle.release.RepositoryType
 import de.thetaphi.forbiddenapis.gradle.CheckForbiddenApis
 import de.thetaphi.forbiddenapis.gradle.CheckForbiddenApisExtension
+import net.ltgt.gradle.errorprone.errorprone
 import org.apache.calcite.buildtools.buildext.dsl.ParenthesisBalancer
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
 plugins {
+    // java-base is needed for platform(...) resolution,
+    // see https://github.com/gradle/gradle/issues/14822
+    `java-base`
     publishing
     // Verification
     checkstyle
@@ -37,6 +41,7 @@ plugins {
     id("org.nosphere.apache.rat")
     id("com.github.spotbugs")
     id("de.thetaphi.forbiddenapis") apply false
+    id("net.ltgt.errorprone") apply false
     id("org.owasp.dependencycheck")
     id("com.github.johnrengelman.shadow") apply false
     // IDE configuration
@@ -60,11 +65,13 @@ val lastEditYear by extra(lastEditYear())
 
 // Do not enable spotbugs by default. Execute it only when -Pspotbugs is present
 val enableSpotBugs = props.bool("spotbugs")
+val enableErrorprone by props()
 val skipCheckstyle by props()
 val skipAutostyle by props()
 val skipJavadoc by props()
 val enableMavenLocal by props()
 val enableGradleMetadata by props()
+val werror by props(true) // treat javac warnings as errors
 // Inherited from stage-vote-release-plugin: skipSign, useGpgCmd
 // Inherited from gradle-extensions-plugin: slowSuiteLogThreshold=0L, slowTestLogThreshold=2000L
 
@@ -86,6 +93,7 @@ val gitProps by tasks.registering(FindGitAttributes::class) {
 
 val rat by tasks.getting(org.nosphere.apache.rat.RatTask::class) {
     gitignore(gitProps)
+    verbose.set(true)
     // Note: patterns are in non-standard syntax for RAT, so we use exclude(..) instead of excludeFile
     exclude(rootDir.resolve(".ratignore").readLines())
 }
@@ -134,7 +142,7 @@ val javadocAggregate by tasks.registering(Javadoc::class) {
     group = JavaBasePlugin.DOCUMENTATION_GROUP
     description = "Generates aggregate javadoc for all the artifacts"
 
-    val sourceSets = allprojects
+    val sourceSets = subprojects
         .mapNotNull { it.extensions.findByType<SourceSetContainer>() }
         .map { it.named("main") }
 
@@ -148,7 +156,7 @@ val javadocAggregate by tasks.registering(Javadoc::class) {
 val javadocAggregateIncludingTests by tasks.registering(Javadoc::class) {
     description = "Generates aggregate javadoc for all the artifacts"
 
-    val sourceSets = allprojects
+    val sourceSets = subprojects
         .mapNotNull { it.extensions.findByType<SourceSetContainer>() }
         .flatMap { listOf(it.named("main"), it.named("test")) }
 
@@ -158,9 +166,9 @@ val javadocAggregateIncludingTests by tasks.registering(Javadoc::class) {
 }
 
 val adaptersForSqlline = listOf(
-    ":babel", ":cassandra", ":druid", ":elasticsearch", ":file", ":geode", ":kafka", ":mongodb",
-    ":pig", ":piglet", ":plus", ":redis", ":spark", ":splunk"
-)
+    ":babel", ":cassandra", ":druid", ":elasticsearch",
+    ":file", ":geode", ":innodb", ":kafka", ":mongodb",
+    ":pig", ":piglet", ":plus", ":redis", ":spark", ":splunk")
 
 val dataSetsForSqlline = listOf(
     "net.hydromatic:foodmart-data-hsqldb",
@@ -170,6 +178,12 @@ val dataSetsForSqlline = listOf(
 
 val sqllineClasspath by configurations.creating {
     isCanBeConsumed = false
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.CLASSES_AND_RESOURCES))
+        attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, JavaVersion.current().majorVersion.toInt())
+        attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling.EXTERNAL))
+    }
 }
 
 dependencies {
@@ -191,7 +205,12 @@ val buildSqllineClasspath by tasks.registering(Jar::class) {
     manifest {
         attributes(
             "Main-Class" to "sqlline.SqlLine",
-            "Class-Path" to provider { sqllineClasspath.joinToString(" ") { it.absolutePath } }
+            "Class-Path" to provider {
+                // Class-Path is a list of URLs
+                sqllineClasspath.joinToString(" ") {
+                    it.toURI().toURL().toString()
+                }
+            }
         )
     }
 }
@@ -309,15 +328,13 @@ allprojects {
     }
     if (!skipCheckstyle) {
         apply<CheckstylePlugin>()
+        // This will be config_loc in Checkstyle (checker.xml)
+        val configLoc = File(rootDir, "src/main/config/checkstyle")
         checkstyle {
             toolVersion = "checkstyle".v
             isShowViolations = true
-            configDirectory.set(File(rootDir, "src/main/config/checkstyle"))
+            configDirectory.set(configLoc)
             configFile = configDirectory.get().file("checker.xml").asFile
-            configProperties = mapOf(
-                "base_dir" to rootDir.toString(),
-                "cache_file" to buildDir.resolve("checkstyle/cacheFile")
-            )
         }
         tasks.register("checkstyleAll") {
             dependsOn(tasks.withType<Checkstyle>())
@@ -328,6 +345,19 @@ allprojects {
             // On the other hand, supporessions.xml still analyzes the file, and
             // then it recognizes it should suppress all the output.
             excludeJavaCcGenerated()
+            // Workaround for https://github.com/gradle/gradle/issues/13927
+            // Absolute paths must not be used as they defeat Gradle build cache
+            // Unfortunately, Gradle passes only config_loc variable by default, so we make
+            // all the paths relative to config_loc
+            configProperties!!["cache_file"] =
+                buildDir.resolve("checkstyle/cacheFile").relativeTo(configLoc)
+        }
+        // afterEvaluate is to support late sourceSet addition (e.g. jmh sourceset)
+        afterEvaluate {
+            tasks.configureEach<Checkstyle> {
+                // Checkstyle 8.26 does not need classpath, see https://github.com/gradle/gradle/issues/14227
+                classpath = files()
+            }
         }
     }
     if (!skipAutostyle || !skipCheckstyle) {
@@ -495,6 +525,34 @@ allprojects {
             signaturesFiles = files("$rootDir/src/main/config/forbidden-apis/signatures.txt")
         }
 
+        if (enableErrorprone) {
+            apply(plugin = "net.ltgt.errorprone")
+            dependencies {
+                "errorprone"("com.google.errorprone:error_prone_core:${"errorprone".v}")
+                "annotationProcessor"("com.google.guava:guava-beta-checker:1.0")
+            }
+            tasks.withType<JavaCompile>().configureEach {
+                options.errorprone {
+                    disableWarningsInGeneratedCode.set(true)
+                    errorproneArgs.add("-XepExcludedPaths:.*/javacc/.*")
+                    disable(
+                        "ComplexBooleanConstant",
+                        "EqualsGetClass",
+                        "OperatorPrecedence",
+                        "MutableConstantField",
+                        "ReferenceEquality",
+                        "SameNameButDifferent",
+                        "TypeParameterUnusedInFormals"
+                    )
+                    // Analyze issues, and enable the check
+                    disable(
+                        "BigDecimalEquals",
+                        "StringSplitter"
+                    )
+                }
+            }
+        }
+
         tasks {
             configureEach<Jar> {
                 manifest {
@@ -523,8 +581,15 @@ allprojects {
 
             configureEach<JavaCompile> {
                 options.encoding = "UTF-8"
+                options.compilerArgs.add("-Xlint:deprecation")
+                if (werror) {
+                    options.compilerArgs.add("-Werror")
+                }
             }
             configureEach<Test> {
+                outputs.cacheIf("test results depend on the database configuration, so we souldn't cache it") {
+                    false
+                }
                 useJUnitPlatform {
                     excludeTags("slow")
                 }

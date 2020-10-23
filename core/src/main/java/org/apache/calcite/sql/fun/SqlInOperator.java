@@ -60,7 +60,8 @@ public class SqlInOperator extends SqlBinaryOperator {
    */
   SqlInOperator(SqlKind kind) {
     this(kind.sql, kind);
-    assert kind == SqlKind.IN || kind == SqlKind.NOT_IN;
+    assert kind == SqlKind.IN || kind == SqlKind.NOT_IN
+        || kind == SqlKind.DRUID_IN || kind == SqlKind.DRUID_NOT_IN;
   }
 
   protected SqlInOperator(String name, SqlKind kind) {
@@ -86,7 +87,7 @@ public class SqlInOperator extends SqlBinaryOperator {
     return litmus.succeed();
   }
 
-  public RelDataType deriveType(
+  @Override public RelDataType deriveType(
       SqlValidator validator,
       SqlValidatorScope scope,
       SqlCall call) {
@@ -184,7 +185,7 @@ public class SqlInOperator extends SqlBinaryOperator {
     return false;
   }
 
-  public boolean argumentMustBeScalar(int ordinal) {
+  @Override public boolean argumentMustBeScalar(int ordinal) {
     // Argument #0 must be scalar, argument #1 can be a list (1, 2) or
     // a query (select deptno from emp). So, only coerce argument #0 into
     // a scalar sub-query. For example, in

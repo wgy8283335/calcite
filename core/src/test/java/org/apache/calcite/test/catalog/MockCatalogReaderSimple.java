@@ -42,7 +42,7 @@ import java.util.List;
  * Simple catalog reader for testing.
  */
 public class MockCatalogReaderSimple extends MockCatalogReader {
-  private final Fixture fixture;
+  private final ObjectSqlType addressType;
 
   /**
    * Creates a MockCatalogReader.
@@ -55,19 +55,20 @@ public class MockCatalogReaderSimple extends MockCatalogReader {
   public MockCatalogReaderSimple(RelDataTypeFactory typeFactory,
       boolean caseSensitive) {
     super(typeFactory, caseSensitive);
-    fixture = new Fixture(typeFactory);
+
+    addressType = new Fixture(typeFactory).addressType;
   }
 
   @Override public RelDataType getNamedType(SqlIdentifier typeName) {
-    if (typeName.equalsDeep(fixture.addressType.getSqlIdentifier(), Litmus.IGNORE)) {
-      return fixture.addressType;
+    if (typeName.equalsDeep(addressType.getSqlIdentifier(), Litmus.IGNORE)) {
+      return addressType;
     } else {
       return super.getNamedType(typeName);
     }
   }
 
   @Override public MockCatalogReader init() {
-    ObjectSqlType addressType = fixture.addressType;
+    final Fixture fixture = new Fixture(typeFactory);
 
     // Register "SALES" schema.
     MockSchema salesSchema = new MockSchema("SALES");
@@ -102,7 +103,7 @@ public class MockCatalogReaderSimple extends MockCatalogReader {
     final MockTable empNullablesTable =
         MockTable.create(this, salesSchema, "EMPNULLABLES", false, 14);
     empNullablesTable.addColumn("EMPNO", fixture.intType, true);
-    empNullablesTable.addColumn("ENAME", fixture.varchar20Type);
+    empNullablesTable.addColumn("ENAME", fixture.varchar20TypeNull);
     empNullablesTable.addColumn("JOB", fixture.varchar10TypeNull);
     empNullablesTable.addColumn("MGR", fixture.intTypeNull);
     empNullablesTable.addColumn("HIREDATE", fixture.timestampTypeNull);
@@ -340,7 +341,7 @@ public class MockCatalogReaderSimple extends MockCatalogReader {
         };
     salesSchema.addTable(Util.last(empNullables20View.getQualifiedName()));
     empNullables20View.addColumn("EMPNO", fixture.intType);
-    empNullables20View.addColumn("ENAME", fixture.varchar20Type);
+    empNullables20View.addColumn("ENAME", fixture.varchar20TypeNull);
     empNullables20View.addColumn("JOB", fixture.varchar10TypeNull);
     empNullables20View.addColumn("MGR", fixture.intTypeNull);
     empNullables20View.addColumn("HIREDATE", fixture.timestampTypeNull);

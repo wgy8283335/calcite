@@ -69,12 +69,16 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.apache.calcite.test.Matchers.isLinux;
 
@@ -385,6 +389,38 @@ class RelWriterTest {
       + "  ]\n"
       + "}";
 
+  public static final String HASH_DIST_WITHOUT_KEYS = "{\n"
+      + "  \"rels\": [\n"
+      + "    {\n"
+      + "      \"id\": \"0\",\n"
+      + "      \"relOp\": \"LogicalTableScan\",\n"
+      + "      \"table\": [\n"
+      + "        \"scott\",\n"
+      + "        \"EMP\"\n"
+      + "      ],\n"
+      + "      \"inputs\": []\n"
+      + "    },\n"
+      + "    {\n"
+      + "      \"id\": \"1\",\n"
+      + "      \"relOp\": \"LogicalSortExchange\",\n"
+      + "      \"distribution\": {\n"
+      + "        \"type\": \"HASH_DISTRIBUTED\"\n"
+      + "      },\n"
+      + "      \"collation\": [\n"
+      + "        {\n"
+      + "          \"field\": 0,\n"
+      + "          \"direction\": \"ASCENDING\",\n"
+      + "          \"nulls\": \"LAST\"\n"
+      + "        }\n"
+      + "      ]\n"
+      + "    }\n"
+      + "  ]\n"
+      + "}";
+
+  static Stream<SqlExplainFormat> explainFormats() {
+    return Stream.of(SqlExplainFormat.TEXT, SqlExplainFormat.DOT);
+  }
+
   /**
    * Unit test for {@link org.apache.calcite.rel.externalize.RelJsonWriter} on
    * a simple tree of relational expressions, consisting of a table and a
@@ -611,7 +647,9 @@ class RelWriterTest {
     assertThat(s, isLinux(expected));
   }
 
-  @Test void testAggregateWithAlias() {
+  @ParameterizedTest
+  @MethodSource("explainFormats")
+  void testAggregateWithAlias(SqlExplainFormat format) {
     final FrameworkConfig config = RelBuilderTest.config().build();
     final RelBuilder builder = RelBuilder.create(config);
     // The rel node stands for sql: SELECT max(SAL) as max_sal from EMP group by JOB;
@@ -629,13 +667,27 @@ class RelWriterTest {
     final RelJsonWriter jsonWriter = new RelJsonWriter();
     rel.explain(jsonWriter);
     final String relJson = jsonWriter.asString();
-    String s = deserializeAndDumpToTextFormat(getSchema(rel), relJson);
-    final String expected = ""
-        + "LogicalProject(max_sal=[$1])\n"
-        + "  LogicalAggregate(group=[{0}], max_sal=[MAX($1)])\n"
-        + "    LogicalProject(JOB=[$2], SAL=[$5])\n"
-        + "      LogicalTableScan(table=[[scott, EMP]])\n";
-
+    String s = deserializeAndDump(getSchema(rel), relJson, format);
+    String expected = null;
+    switch (format) {
+    case TEXT:
+      expected = ""
+          + "LogicalProject(max_sal=[$1])\n"
+          + "  LogicalAggregate(group=[{0}], max_sal=[MAX($1)])\n"
+          + "    LogicalProject(JOB=[$2], SAL=[$5])\n"
+          + "      LogicalTableScan(table=[[scott, EMP]])\n";
+      break;
+    case DOT:
+      expected = "digraph {\n"
+          + "\"LogicalAggregate\\ngroup = {0}\\nmax_sal = MAX($1)\\n\" -> "
+          + "\"LogicalProject\\nmax_sal = $1\\n\" [label=\"0\"]\n"
+          + "\"LogicalProject\\nJOB = $2\\nSAL = $5\\n\" -> \"LogicalAggregate\\ngroup = "
+          + "{0}\\nmax_sal = MAX($1)\\n\" [label=\"0\"]\n"
+          + "\"LogicalTableScan\\ntable = [scott, EMP]\\n\" -> \"LogicalProject\\nJOB = $2\\nSAL = "
+          + "$5\\n\" [label=\"0\"]\n"
+          + "}\n";
+      break;
+    }
     assertThat(s, isLinux(expected));
   }
 
@@ -703,7 +755,9 @@ class RelWriterTest {
     assertThat(s, isLinux(expected));
   }
 
-  @Test void testCorrelateQuery() {
+  @ParameterizedTest
+  @MethodSource("explainFormats")
+  void testCorrelateQuery(SqlExplainFormat format) {
     final FrameworkConfig config = RelBuilderTest.config().build();
     final RelBuilder builder = RelBuilder.create(config);
     final Holder<RexCorrelVariable> v = Holder.of(null);
@@ -718,13 +772,28 @@ class RelWriterTest {
     RelJsonWriter jsonWriter = new RelJsonWriter();
     relNode.explain(jsonWriter);
     final String relJson = jsonWriter.asString();
-    String s = deserializeAndDumpToTextFormat(getSchema(relNode), relJson);
-    final String expected = ""
-        + "LogicalCorrelate(correlation=[$cor0], joinType=[inner], requiredColumns=[{7}])\n"
-        + "  LogicalTableScan(table=[[scott, EMP]])\n"
-        + "  LogicalFilter(condition=[=($0, $cor0.DEPTNO)])\n"
-        + "    LogicalTableScan(table=[[scott, DEPT]])\n";
-
+    String s = deserializeAndDump(getSchema(relNode), relJson, format);
+    String expected = null;
+    switch (format) {
+    case TEXT:
+      expected = ""
+          + "LogicalCorrelate(correlation=[$cor0], joinType=[inner], requiredColumns=[{7}])\n"
+          + "  LogicalTableScan(table=[[scott, EMP]])\n"
+          + "  LogicalFilter(condition=[=($0, $cor0.DEPTNO)])\n"
+          + "    LogicalTableScan(table=[[scott, DEPT]])\n";
+      break;
+    case DOT:
+      expected = "digraph {\n"
+          + "\"LogicalTableScan\\ntable = [scott, EMP]\\n\" -> \"LogicalCorrelate\\ncorrelation = "
+          + "$cor0\\njoinType = inner\\nrequiredColumns = {7\\n}\\n\" [label=\"0\"]\n"
+          + "\"LogicalFilter\\ncondition = =($0, $c\\nor0.DEPTNO)\\n\" -> "
+          + "\"LogicalCorrelate\\ncorrelation = $cor0\\njoinType = inner\\nrequiredColumns = "
+          + "{7\\n}\\n\" [label=\"1\"]\n"
+          + "\"LogicalTableScan\\ntable = [scott, DEPT\\n]\\n\" -> \"LogicalFilter\\ncondition = ="
+          + "($0, $c\\nor0.DEPTNO)\\n\" [label=\"0\"]\n"
+          + "}\n";
+      break;
+    }
     assertThat(s, isLinux(expected));
   }
 
@@ -797,6 +866,60 @@ class RelWriterTest {
     assertThat(s, isLinux(expected));
   }
 
+  @ParameterizedTest
+  @MethodSource("explainFormats")
+  void testUDAF(SqlExplainFormat format) {
+    final FrameworkConfig config = RelBuilderTest.config().build();
+    final RelBuilder builder = RelBuilder.create(config);
+    final RelNode rel = builder
+        .scan("EMP")
+        .project(builder.field("ENAME"), builder.field("DEPTNO"))
+        .aggregate(
+            builder.groupKey("ENAME"),
+            builder.aggregateCall(new MockSqlOperatorTable.MyAggFunc(),
+                builder.field("DEPTNO")))
+        .build();
+    final String relJson = RelOptUtil.dumpPlan("", rel,
+        SqlExplainFormat.JSON, SqlExplainLevel.EXPPLAN_ATTRIBUTES);
+    final String result = deserializeAndDump(getSchema(rel), relJson, format);
+    String expected = null;
+    switch (format) {
+    case TEXT:
+      expected = ""
+          + "LogicalAggregate(group=[{0}], agg#0=[myAggFunc($1)])\n"
+          + "  LogicalProject(ENAME=[$1], DEPTNO=[$7])\n"
+          + "    LogicalTableScan(table=[[scott, EMP]])\n";
+      break;
+    case DOT:
+      expected = "digraph {\n"
+          + "\"LogicalProject\\nENAME = $1\\nDEPTNO = $7\\n\" -> \"LogicalAggregate\\ngroup = "
+          + "{0}\\nagg#0 = myAggFunc($1\\n)\\n\" [label=\"0\"]\n"
+          + "\"LogicalTableScan\\ntable = [scott, EMP]\\n\" -> \"LogicalProject\\nENAME = "
+          + "$1\\nDEPTNO = $7\\n\" [label=\"0\"]\n"
+          + "}\n";
+      break;
+    }
+    assertThat(result, isLinux(expected));
+  }
+
+  @Test void testArrayType() {
+    final FrameworkConfig config = RelBuilderTest.config().build();
+    final RelBuilder builder = RelBuilder.create(config);
+    final RelNode rel = builder
+        .scan("EMP")
+        .project(
+            builder.call(new MockSqlOperatorTable.SplitFunction(),
+                builder.field("ENAME"), builder.literal(",")))
+        .build();
+    final String relJson = RelOptUtil.dumpPlan("", rel,
+        SqlExplainFormat.JSON, SqlExplainLevel.EXPPLAN_ATTRIBUTES);
+    final String s = deserializeAndDumpToTextFormat(getSchema(rel), relJson);
+    final String expected = ""
+        + "LogicalProject($f0=[SPLIT($1, ',')])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(s, isLinux(expected));
+  }
+
   /** Returns the schema of a {@link org.apache.calcite.rel.core.TableScan}
    * in this plan, or null if there are no scans. */
   private RelOptSchema getSchema(RelNode rel) {
@@ -813,9 +936,10 @@ class RelWriterTest {
 
   /**
    * Deserialize a relnode from the json string by {@link RelJsonReader},
-   * and dump it to text format.
+   * and dump it to the given format.
    */
-  private String deserializeAndDumpToTextFormat(RelOptSchema schema, String relJson) {
+  private String deserializeAndDump(
+      RelOptSchema schema, String relJson, SqlExplainFormat format) {
     String s =
         Frameworks.withPlanner((cluster, relOptSchema, rootSchema) -> {
           final RelJsonReader reader = new RelJsonReader(
@@ -826,20 +950,33 @@ class RelWriterTest {
           } catch (IOException e) {
             throw TestUtil.rethrow(e);
           }
-          return RelOptUtil.dumpPlan("", node, SqlExplainFormat.TEXT,
+          return RelOptUtil.dumpPlan("", node, format,
               SqlExplainLevel.EXPPLAN_ATTRIBUTES);
         });
     return s;
   }
 
   /**
-   * Mock a {@link RelNode} for sql:
-   * select count(*) over (partition by {@code partitionKeyNames}
+   * Deserialize a relnode from the json string by {@link RelJsonReader},
+   * and dump it to text format.
+   */
+  private String deserializeAndDumpToTextFormat(RelOptSchema schema, String relJson) {
+    return deserializeAndDump(schema, relJson, SqlExplainFormat.TEXT);
+  }
+
+  /**
+   * Creates a mock {@link RelNode} that contains OVER. The SQL is as follows:
+   *
+   * <blockquote>
+   * select count(*) over (partition by {@code partitionKeyNames}<br>
    * order by {@code orderKeyNames}) from {@code table}
+   * </blockquote>
+   *
    * @param table Table name
-   * @param partitionKeyNames Partition by column names, may empty, can not be null
+   * @param partitionKeyNames Partition by column names, may empty, can not be
+   * null
    * @param orderKeyNames Order by column names, may empty, can not be null
-   * @return RelNode for the sql
+   * @return RelNode for the SQL
    */
   private RelNode mockCountOver(String table,
       List<String> partitionKeyNames, List<String> orderKeyNames) {
@@ -870,6 +1007,20 @@ class RelWriterTest {
                 true, true, false, false, false))
         .build();
     return rel;
+  }
+
+  @Test void testHashDistributionWithoutKeys() {
+    final RelNode root = createSortPlan(RelDistributions.hash(Collections.emptyList()));
+    final RelJsonWriter writer = new RelJsonWriter();
+    root.explain(writer);
+    final String json = writer.asString();
+    assertThat(json, is(HASH_DIST_WITHOUT_KEYS));
+
+    final String s = deserializeAndDumpToTextFormat(getSchema(root), json);
+    final String expected =
+        "LogicalSortExchange(distribution=[hash], collation=[[0]])\n"
+            + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(s, isLinux(expected));
   }
 
   @Test void testWriteSortExchangeWithHashDistribution() {

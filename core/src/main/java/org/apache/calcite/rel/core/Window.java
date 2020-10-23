@@ -77,7 +77,7 @@ public abstract class Window extends SingleRel {
    * @param rowType Output row type
    * @param groups Windows
    */
-  public Window(RelOptCluster cluster, RelTraitSet traitSet, RelNode input,
+  protected Window(RelOptCluster cluster, RelTraitSet traitSet, RelNode input,
       List<RexLiteral> constants, RelDataType rowType, List<Group> groups) {
     super(cluster, traitSet, input);
     this.constants = ImmutableList.copyOf(constants);
@@ -123,7 +123,7 @@ public abstract class Window extends SingleRel {
     return litmus.succeed();
   }
 
-  public RelWriter explainTerms(RelWriter pw) {
+  @Override public RelWriter explainTerms(RelWriter pw) {
     super.explainTerms(pw);
     for (Ord<Group> window : Ord.zip(groups)) {
       pw.item("window#" + window.i, window.e.toString());
@@ -134,11 +134,11 @@ public abstract class Window extends SingleRel {
   public static ImmutableIntList getProjectOrdinals(final List<RexNode> exprs) {
     return ImmutableIntList.copyOf(
         new AbstractList<Integer>() {
-          public Integer get(int index) {
+          @Override public Integer get(int index) {
             return ((RexSlot) exprs.get(index)).getIndex();
           }
 
-          public int size() {
+          @Override public int size() {
             return exprs.size();
           }
         });
@@ -148,7 +148,7 @@ public abstract class Window extends SingleRel {
       final List<RexFieldCollation> collations) {
     return RelCollations.of(
         new AbstractList<RelFieldCollation>() {
-          public RelFieldCollation get(int index) {
+          @Override public RelFieldCollation get(int index) {
             final RexFieldCollation collation = collations.get(index);
             return new RelFieldCollation(
                 ((RexLocalRef) collation.left).getIndex(),
@@ -156,7 +156,7 @@ public abstract class Window extends SingleRel {
                 collation.getNullDirection());
           }
 
-          public int size() {
+          @Override public int size() {
             return collations.size();
           }
         });
@@ -239,7 +239,7 @@ public abstract class Window extends SingleRel {
       this.digest = computeString();
     }
 
-    public String toString() {
+    @Override public String toString() {
       return digest;
     }
 
@@ -308,7 +308,7 @@ public abstract class Window extends SingleRel {
      * @return true when the window is non-empty
      * @see org.apache.calcite.sql.SqlWindow#isAlwaysNonEmpty()
      * @see org.apache.calcite.sql.SqlOperatorBinding#getGroupCount()
-     * @see org.apache.calcite.sql.validate.SqlValidatorImpl#resolveWindow(org.apache.calcite.sql.SqlNode, org.apache.calcite.sql.validate.SqlValidatorScope, boolean)
+     * @see org.apache.calcite.sql.validate.SqlValidatorImpl#resolveWindow(org.apache.calcite.sql.SqlNode, org.apache.calcite.sql.validate.SqlValidatorScope)
      */
     public boolean isAlwaysNonEmpty() {
       int lowerKey = lowerBound.getOrderKey();
@@ -325,11 +325,11 @@ public abstract class Window extends SingleRel {
           Util.skip(windowRel.getRowType().getFieldNames(),
               windowRel.getInput().getRowType().getFieldCount());
       return new AbstractList<AggregateCall>() {
-        public int size() {
+        @Override public int size() {
           return aggCalls.size();
         }
 
-        public AggregateCall get(int index) {
+        @Override public AggregateCall get(int index) {
           final RexWinAggCall aggCall = aggCalls.get(index);
           final SqlAggFunction op = (SqlAggFunction) aggCall.getOperator();
           return AggregateCall.create(op, aggCall.distinct, false,
@@ -394,16 +394,27 @@ public abstract class Window extends SingleRel {
       this.ignoreNulls = ignoreNulls;
     }
 
-    /** {@inheritDoc}
-     *
-     * <p>Override {@link RexCall}, defining equality based on identity.
-     */
-    @Override public boolean equals(Object obj) {
-      return this == obj;
+    @Override public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (o == null || getClass() != o.getClass()) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+      RexWinAggCall that = (RexWinAggCall) o;
+      return ordinal == that.ordinal
+          && distinct == that.distinct
+          && ignoreNulls == that.ignoreNulls;
     }
 
     @Override public int hashCode() {
-      return Objects.hash(digest, ordinal, distinct);
+      if (hash == 0) {
+        hash = Objects.hash(super.hashCode(), ordinal, distinct, ignoreNulls);
+      }
+      return hash;
     }
 
     @Override public RexCall clone(RelDataType type, List<RexNode> operands) {

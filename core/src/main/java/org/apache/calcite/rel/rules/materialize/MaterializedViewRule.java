@@ -19,10 +19,9 @@ package org.apache.calcite.rel.rules.materialize;
 import org.apache.calcite.plan.RelOptMaterialization;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptPredicateList;
-import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
-import org.apache.calcite.plan.RelOptRuleOperand;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.RelRule;
 import org.apache.calcite.plan.SubstitutionVisitor;
 import org.apache.calcite.plan.hep.HepProgram;
 import org.apache.calcite.rel.RelNode;
@@ -35,6 +34,7 @@ import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexExecutor;
@@ -48,12 +48,13 @@ import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.tools.RelBuilder;
-import org.apache.calcite.tools.RelBuilderFactory;
+import org.apache.calcite.util.ImmutableBeans;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 import org.apache.calcite.util.graph.DefaultDirectedGraph;
 import org.apache.calcite.util.graph.DefaultEdge;
 import org.apache.calcite.util.graph.DirectedGraph;
+import org.apache.calcite.util.mapping.IntPair;
 import org.apache.calcite.util.mapping.Mapping;
 
 import com.google.common.collect.ArrayListMultimap;
@@ -74,7 +75,6 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 
 /**
@@ -82,34 +82,17 @@ import java.util.Set;
  * followed by {@link org.apache.calcite.rel.core.Aggregate} or an
  * {@link org.apache.calcite.rel.core.Aggregate} to a scan (and possibly
  * other operations) over a materialized view.
+ *
+ * @param <C> Configuration type
  */
-public abstract class MaterializedViewRule extends RelOptRule {
-
-  //~ Instance fields --------------------------------------------------------
-
-  /** Whether to generate rewritings containing union if the query results
-   * are contained within the view results. */
-  protected final boolean generateUnionRewriting;
-
-  /** If we generate union rewriting, we might want to pull up projections
-   * from the query itself to maximize rewriting opportunities. */
-  protected final HepProgram unionRewritingPullProgram;
-
-  /** Whether we should create the rewriting in the minimal subtree of plan
-   * operators. */
-  protected final boolean fastBailOut;
+public abstract class MaterializedViewRule<C extends MaterializedViewRule.Config>
+    extends RelRule<C> {
 
   //~ Constructors -----------------------------------------------------------
 
-  /** Creates a AbstractMaterializedViewRule. */
-  protected MaterializedViewRule(RelOptRuleOperand operand,
-      RelBuilderFactory relBuilderFactory, String description,
-      boolean generateUnionRewriting, HepProgram unionRewritingPullProgram,
-      boolean fastBailOut) {
-    super(operand, relBuilderFactory, description);
-    this.generateUnionRewriting = generateUnionRewriting;
-    this.unionRewritingPullProgram = unionRewritingPullProgram;
-    this.fastBailOut = fastBailOut;
+  /** Creates a MaterializedViewRule. */
+  MaterializedViewRule(C config) {
+    super(config);
   }
 
   @Override public boolean matches(RelOptRuleCall call) {
@@ -338,7 +321,7 @@ public abstract class MaterializedViewRule extends RelOptRule {
           // the mapping to the query mapping
           final EquivalenceClasses currQEC = EquivalenceClasses.copy(qEC);
           if (matchModality == MatchModality.QUERY_PARTIAL) {
-            for (Entry<RexTableInputRef, RexTableInputRef> e
+            for (Map.Entry<RexTableInputRef, RexTableInputRef> e
                 : compensationEquiColumns.entries()) {
               // Copy origin
               RelTableRef queryTableRef = queryToViewTableMapping.inverse().get(
@@ -371,7 +354,7 @@ public abstract class MaterializedViewRule extends RelOptRule {
               computeCompensationPredicates(rexBuilder, simplify,
                   currQEC, queryPreds, queryBasedVEC, viewPreds,
                   queryToViewTableMapping);
-          if (compensationPreds == null && generateUnionRewriting) {
+          if (compensationPreds == null && config.generateUnionRewriting()) {
             // Attempt partial rewriting using union operator. This rewriting
             // will read some data from the view and the rest of the data from
             // the query computation. The resulting predicates are expressed
@@ -428,7 +411,7 @@ public abstract class MaterializedViewRule extends RelOptRule {
               // in the view output (condition 2).
               List<RexNode> viewExprs = topViewProject == null
                   ? extractReferences(rexBuilder, view)
-                  : topViewProject.getChildExps();
+                  : topViewProject.getProjects();
               // For compensationColumnsEquiPred, we use the view equivalence classes,
               // since we want to enforce the rest
               if (!compensationColumnsEquiPred.isAlwaysTrue()) {
@@ -596,7 +579,7 @@ public abstract class MaterializedViewRule extends RelOptRule {
     List<BiMap<RelTableRef, RelTableRef>> result =
         ImmutableList.of(
             HashBiMap.create());
-    for (Entry<RelTableRef, Collection<RelTableRef>> e : multiMapTables.asMap().entrySet()) {
+    for (Map.Entry<RelTableRef, Collection<RelTableRef>> e : multiMapTables.asMap().entrySet()) {
       if (e.getValue().size() == 1) {
         // Only one reference, we can just add it to every map
         RelTableRef target = e.getValue().iterator().next();
@@ -623,20 +606,21 @@ public abstract class MaterializedViewRule extends RelOptRule {
     return result;
   }
 
-  /** Currently we only support TableScan - Project - Filter - Inner Join */
+  /** Returns whether a RelNode is a valid tree. Currently we only support
+   * TableScan - Project - Filter - Inner Join. */
   protected boolean isValidRelNodePlan(RelNode node, RelMetadataQuery mq) {
     final Multimap<Class<? extends RelNode>, RelNode> m =
-            mq.getNodeTypes(node);
+        mq.getNodeTypes(node);
     if (m == null) {
       return false;
     }
 
-    for (Entry<Class<? extends RelNode>, Collection<RelNode>> e : m.asMap().entrySet()) {
+    for (Map.Entry<Class<? extends RelNode>, Collection<RelNode>> e : m.asMap().entrySet()) {
       Class<? extends RelNode> c = e.getKey();
       if (!TableScan.class.isAssignableFrom(c)
-              && !Project.class.isAssignableFrom(c)
-              && !Filter.class.isAssignableFrom(c)
-              && (!Join.class.isAssignableFrom(c))) {
+          && !Project.class.isAssignableFrom(c)
+          && !Filter.class.isAssignableFrom(c)
+          && !Join.class.isAssignableFrom(c)) {
         // Skip it
         return false;
       }
@@ -731,22 +715,29 @@ public abstract class MaterializedViewRule extends RelOptRule {
       // Add edges between tables
       List<RelReferentialConstraint> constraints =
           tRef.getTable().getReferentialConstraints();
+      if (constraints == null) {
+        constraints = ImmutableList.of();
+      }
       for (RelReferentialConstraint constraint : constraints) {
         Collection<RelTableRef> parentTableRefs =
             tableVNameToTableRefs.get(constraint.getTargetQualifiedName());
         for (RelTableRef parentTRef : parentTableRefs) {
           boolean canBeRewritten = true;
-          Multimap<RexTableInputRef, RexTableInputRef> equiColumns =
-                  ArrayListMultimap.create();
-          for (int pos = 0; pos < constraint.getNumColumns(); pos++) {
-            int foreignKeyPos = constraint.getColumnPairs().get(pos).source;
-            RelDataType foreignKeyColumnType =
-                tRef.getTable().getRowType().getFieldList().get(foreignKeyPos).getType();
-            RexTableInputRef foreignKeyColumnRef =
-                RexTableInputRef.of(tRef, foreignKeyPos, foreignKeyColumnType);
-            int uniqueKeyPos = constraint.getColumnPairs().get(pos).target;
-            RexTableInputRef uniqueKeyColumnRef = RexTableInputRef.of(parentTRef, uniqueKeyPos,
-                parentTRef.getTable().getRowType().getFieldList().get(uniqueKeyPos).getType());
+          final Multimap<RexTableInputRef, RexTableInputRef> equiColumns =
+              ArrayListMultimap.create();
+          final List<RelDataTypeField> foreignFields =
+              tRef.getTable().getRowType().getFieldList();
+          final List<RelDataTypeField> uniqueFields =
+              parentTRef.getTable().getRowType().getFieldList();
+          for (IntPair pair : constraint.getColumnPairs()) {
+            final RelDataType foreignKeyColumnType =
+                foreignFields.get(pair.source).getType();
+            final RexTableInputRef foreignKeyColumnRef =
+                RexTableInputRef.of(tRef, pair.source, foreignKeyColumnType);
+            final RelDataType uniqueKeyColumnType =
+                uniqueFields.get(pair.target).getType();
+            final RexTableInputRef uniqueKeyColumnRef =
+                RexTableInputRef.of(parentTRef, pair.target, uniqueKeyColumnType);
             if (!foreignKeyColumnType.isNullable()
                 && sourceEC.getEquivalenceClassesMap().containsKey(uniqueKeyColumnRef)
                 && sourceEC.getEquivalenceClassesMap().get(uniqueKeyColumnRef)
@@ -1323,7 +1314,7 @@ public abstract class MaterializedViewRule extends RelOptRule {
 
     protected static EquivalenceClasses copy(EquivalenceClasses ec) {
       final EquivalenceClasses newEc = new EquivalenceClasses();
-      for (Entry<RexTableInputRef, Set<RexTableInputRef>> e
+      for (Map.Entry<RexTableInputRef, Set<RexTableInputRef>> e
           : ec.nodeToEquivalenceClass.entrySet()) {
         newEc.nodeToEquivalenceClass.put(
             e.getKey(), Sets.newLinkedHashSet(e.getValue()));
@@ -1347,7 +1338,7 @@ public abstract class MaterializedViewRule extends RelOptRule {
     }
   }
 
-  /** Edge for graph */
+  /** Edge for graph. */
   protected static class Edge extends DefaultEdge {
     final Multimap<RexTableInputRef, RexTableInputRef> equiColumns =
         ArrayListMultimap.create();
@@ -1356,12 +1347,12 @@ public abstract class MaterializedViewRule extends RelOptRule {
       super(source, target);
     }
 
-    public String toString() {
+    @Override public String toString() {
       return "{" + source + " -> " + target + "}";
     }
   }
 
-  /** View partitioning result */
+  /** View partitioning result. */
   protected static class ViewPartialRewriting {
     private final RelNode newView;
     private final Project newTopViewProject;
@@ -1386,4 +1377,30 @@ public abstract class MaterializedViewRule extends RelOptRule {
     QUERY_PARTIAL
   }
 
+  /** Rule configuration. */
+  public interface Config extends RelRule.Config {
+    /** Whether to generate rewritings containing union if the query results
+     * are contained within the view results. */
+    @ImmutableBeans.Property
+    boolean generateUnionRewriting();
+
+    /** Sets {@link #generateUnionRewriting()}. */
+    Config withGenerateUnionRewriting(boolean b);
+
+    /** If we generate union rewriting, we might want to pull up projections
+     * from the query itself to maximize rewriting opportunities. */
+    @ImmutableBeans.Property
+    HepProgram unionRewritingPullProgram();
+
+    /** Sets {@link #unionRewritingPullProgram()}. */
+    Config withUnionRewritingPullProgram(HepProgram program);
+
+    /** Whether we should create the rewriting in the minimal subtree of plan
+     * operators. */
+    @ImmutableBeans.Property
+    boolean fastBailOut();
+
+    /** Sets {@link #fastBailOut()}. */
+    Config withFastBailOut(boolean b);
+  }
 }

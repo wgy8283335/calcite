@@ -62,7 +62,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -227,8 +226,7 @@ public class SqlValidatorUtil {
       RelDataType sourceRowType,
       Map<Integer, RelDataTypeField> indexToField) {
     ImmutableBitSet source = ImmutableBitSet.of(
-        Lists.transform(sourceRowType.getFieldList(),
-            RelDataTypeField::getIndex));
+        Util.transform(sourceRowType.getFieldList(), RelDataTypeField::getIndex));
     ImmutableBitSet target =
         ImmutableBitSet.of(indexToField.keySet());
     return source.intersect(target);
@@ -275,8 +273,7 @@ public class SqlValidatorUtil {
    */
   static void checkIdentifierListForDuplicates(List<SqlNode> columnList,
       SqlValidatorImpl.ValidationErrorFunction validationErrorFunction) {
-    final List<List<String>> names = Lists.transform(columnList,
-        o -> ((SqlIdentifier) o).names);
+    final List<List<String>> names = Util.transform(columnList, o -> ((SqlIdentifier) o).names);
     final int i = Util.firstDuplicate(names);
     if (i >= 0) {
       throw validationErrorFunction.apply(columnList.get(i),
@@ -844,9 +841,12 @@ public class SqlValidatorUtil {
           && ((SqlNodeList) expandedGroupExpr).size() == 0) {
         return ImmutableBitSet.of();
       }
+      break;
+    default:
+      break;
     }
 
-    final int ref = lookupGroupExpr(groupAnalyzer, groupExpr);
+    final int ref = lookupGroupExpr(groupAnalyzer, expandedGroupExpr);
     if (expandedGroupExpr instanceof SqlIdentifier) {
       // SQL 2003 does not allow expressions of column references
       SqlIdentifier expr = (SqlIdentifier) expandedGroupExpr;
@@ -906,6 +906,8 @@ public class SqlValidatorUtil {
     case TUMBLE:
     case SESSION:
       groupAnalyzer.extraExprs.add(expr);
+      break;
+    default:
       break;
     }
     groupAnalyzer.groupExprs.add(expr);
@@ -1077,7 +1079,8 @@ public class SqlValidatorUtil {
     for (SqlValidatorNamespace ns : children(scope)) {
       ns = ns.resolve();
       for (String field : ns.getRowType().getFieldNames()) {
-        if (!ns.getMonotonicity(field).mayRepeat()) {
+        SqlMonotonicity monotonicity = ns.getMonotonicity(field);
+        if (monotonicity != null && !monotonicity.mayRepeat()) {
           return true;
         }
       }
@@ -1229,7 +1232,7 @@ public class SqlValidatorUtil {
       return (SqlNodeList) list.accept(new DeepCopier(scope));
     }
 
-    public SqlNode visit(SqlNodeList list) {
+    @Override public SqlNode visit(SqlNodeList list) {
       SqlNodeList copy = new SqlNodeList(list.getParserPosition());
       for (SqlNode node : list) {
         copy.add(node.accept(this));
@@ -1239,18 +1242,18 @@ public class SqlValidatorUtil {
 
     // Override to copy all arguments regardless of whether visitor changes
     // them.
-    protected SqlNode visitScoped(SqlCall call) {
+    @Override protected SqlNode visitScoped(SqlCall call) {
       ArgHandler<SqlNode> argHandler =
           new CallCopyingArgHandler(call, true);
       call.getOperator().acceptCall(this, call, false, argHandler);
       return argHandler.result();
     }
 
-    public SqlNode visit(SqlLiteral literal) {
+    @Override public SqlNode visit(SqlLiteral literal) {
       return SqlNode.clone(literal);
     }
 
-    public SqlNode visit(SqlIdentifier id) {
+    @Override public SqlNode visit(SqlIdentifier id) {
       // First check for builtin functions which don't have parentheses,
       // like "LOCALTIME".
       SqlValidator validator = getScope().getValidator();
@@ -1262,15 +1265,15 @@ public class SqlValidatorUtil {
       return getScope().fullyQualify(id).identifier;
     }
 
-    public SqlNode visit(SqlDataTypeSpec type) {
+    @Override public SqlNode visit(SqlDataTypeSpec type) {
       return SqlNode.clone(type);
     }
 
-    public SqlNode visit(SqlDynamicParam param) {
+    @Override public SqlNode visit(SqlDynamicParam param) {
       return SqlNode.clone(param);
     }
 
-    public SqlNode visit(SqlIntervalQualifier intervalQualifier) {
+    @Override public SqlNode visit(SqlIntervalQualifier intervalQualifier) {
       return SqlNode.clone(intervalQualifier);
     }
   }
@@ -1296,19 +1299,8 @@ public class SqlValidatorUtil {
     /** Extra expressions, computed from the input as extra GROUP BY
      * expressions. For example, calls to the {@code TUMBLE} functions. */
     final List<SqlNode> extraExprs = new ArrayList<>();
-    final List<SqlNode> groupExprs;
+    final List<SqlNode> groupExprs = new ArrayList<>();
     final Map<Integer, Integer> groupExprProjection = new HashMap<>();
-    int groupCount;
-
-    GroupAnalyzer(List<SqlNode> groupExprs) {
-      this.groupExprs = groupExprs;
-    }
-
-    SqlNode createGroupExpr() {
-      // TODO: create an expression that could have no other source
-      return SqlLiteral.createCharString("xyz" + groupCount++,
-          SqlParserPos.ZERO);
-    }
   }
 
   /**

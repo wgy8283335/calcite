@@ -296,8 +296,8 @@ public class ReflectiveSchemaTest {
             + "primitiveBoolean=true; primitiveByte=127; primitiveChar=\uffff; primitiveShort=32767; primitiveInt=2147483647; primitiveLong=9223372036854775807; primitiveFloat=3.4028235E38; primitiveDouble=1.7976931348623157E308; wrapperBoolean=null; wrapperByte=null; wrapperCharacter=null; wrapperShort=null; wrapperInteger=null; wrapperLong=null; wrapperFloat=null; wrapperDouble=null; sqlDate=null; sqlTime=null; sqlTimestamp=null; utilDate=null; string=null; bigDecimal=null\n");
   }
 
-  /**
-   * Tests NOT for nullable columns
+  /** Tests NOT for nullable columns.
+   *
    * @see CatchallSchema#everyTypes */
   @Test void testWhereNOT() throws Exception {
     final CalciteAssert.AssertThat with =
@@ -307,8 +307,8 @@ public class ReflectiveSchemaTest {
         .returnsUnordered("wrapperByte=0");
   }
 
-  /**
-   * Tests NOT for nullable columns
+  /** Tests NOT for nullable columns.
+   *
    * @see CatchallSchema#everyTypes */
   @Test void testSelectNOT() throws Exception {
     final CalciteAssert.AssertThat with =
@@ -585,10 +585,9 @@ public class ReflectiveSchemaTest {
     with.query("select \"wrapperLong\" / \"primitiveLong\" as c\n"
         + " from \"s\".\"everyTypes\" where \"primitiveLong\" <> 0")
         .planContains(
-            "final Long inp13_ = current.wrapperLong;")
+            "final Long input_value = current.wrapperLong;")
         .planContains(
-            "return inp13_ == null ? (Long) null "
-                + ": Long.valueOf(inp13_.longValue() / current.primitiveLong);")
+            "return input_value == null ? (Long) null : Long.valueOf(input_value.longValue() / current.primitiveLong);")
         .returns("C=null\n");
   }
 
@@ -606,10 +605,9 @@ public class ReflectiveSchemaTest {
     with.query("select \"wrapperLong\" / \"wrapperLong\" as c\n"
         + " from \"s\".\"everyTypes\" where \"primitiveLong\" <> 0")
         .planContains(
-            "final Long inp13_ = ((org.apache.calcite.test.ReflectiveSchemaTest.EveryType) inputEnumerator.current()).wrapperLong;")
+            "final Long input_value = ((org.apache.calcite.test.ReflectiveSchemaTest.EveryType) inputEnumerator.current()).wrapperLong;")
         .planContains(
-            "return inp13_ == null ? (Long) null "
-                + ": Long.valueOf(inp13_.longValue() / inp13_.longValue());")
+            "return input_value == null ? (Long) null : Long.valueOf(input_value.longValue() / input_value.longValue());")
         .returns("C=null\n");
   }
 
@@ -620,11 +618,11 @@ public class ReflectiveSchemaTest {
         + "+ \"wrapperLong\" / \"wrapperLong\" as c\n"
         + " from \"s\".\"everyTypes\" where \"primitiveLong\" <> 0")
         .planContains(
-            "final Long inp13_ = ((org.apache.calcite.test.ReflectiveSchemaTest.EveryType) inputEnumerator.current()).wrapperLong;")
+            "final Long input_value = ((org.apache.calcite.test.ReflectiveSchemaTest.EveryType) inputEnumerator.current()).wrapperLong;")
         .planContains(
-            "return inp13_ == null ? (Long) null "
-                + ": Long.valueOf(Long.valueOf(inp13_.longValue() / inp13_.longValue()).longValue() "
-                + "+ Long.valueOf(inp13_.longValue() / inp13_.longValue()).longValue());")
+            "final Long binary_call_value = input_value == null ? (Long) null : Long.valueOf(input_value.longValue() / input_value.longValue());")
+        .planContains(
+            "return binary_call_value == null ? (Long) null : Long.valueOf(binary_call_value.longValue() + binary_call_value.longValue());")
         .returns("C=null\n");
   }
 
@@ -763,7 +761,7 @@ public class ReflectiveSchemaTest {
                 + "empid=4; deptno=10; name=Abd; salary=0.0; commission=null\n");
   }
 
-  /** Table with single field as Integer[] */
+  /** Table with single field as Integer[]. */
   @Disabled(
       "java.lang.AssertionError RelDataTypeImpl.getFieldList(RelDataTypeImpl.java:99)")
   @Test void testArrayOfBoxedPrimitives() {
@@ -773,7 +771,7 @@ public class ReflectiveSchemaTest {
         .returnsUnordered("value=1", "value=3", "value=7");
   }
 
-  /** Table with single field as int[] */
+  /** Table with single field as int[]. */
   @Disabled(
       "java.lang.AssertionError RelDataTypeImpl.getFieldList(RelDataTypeImpl.java:99)")
   @Test void testArrayOfPrimitives() {
@@ -979,7 +977,7 @@ public class ReflectiveSchemaTest {
     public final BitSet bitSet = new BitSet(0);
   }
 
-  /** Table that has integer and string fields */
+  /** Table that has integer and string fields. */
   public static class IntAndString {
     public final int id;
     public final String value;
@@ -1064,12 +1062,24 @@ public class ReflectiveSchemaTest {
     };
   }
 
-  /** CALCITE-2611 unknown on one side of an or may lead to uncompilable code */
+  /** Tests
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-2611">[CALCITE-2611]
+   * UNKNOWN on one side of an OR may lead to uncompilable code</a>. */
   @Test void testUnknownInOr() {
     CalciteAssert.that()
         .withSchema("s", CATCHALL)
         .query("select (\"value\" = 3 and unknown) or ( \"value\"  = 3 ) "
             + "from \"s\".\"primesCustomBoxed\"")
         .returnsUnordered("EXPR$0=false\nEXPR$0=false\nEXPR$0=true");
+  }
+
+  @Test void testDecimalNegate() {
+    final CalciteAssert.AssertThat with =
+        CalciteAssert.that().withSchema("s", CATCHALL);
+    with.query("select - \"bigDecimal\" from \"s\".\"everyTypes\"")
+        .planContains("negate()")
+        .returnsUnordered(
+            "EXPR$0=0",
+            "EXPR$0=null");
   }
 }

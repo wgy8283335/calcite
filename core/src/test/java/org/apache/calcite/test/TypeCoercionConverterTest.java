@@ -32,8 +32,9 @@ class TypeCoercionConverterTest extends SqlToRelTestBase {
   }
 
   @Override protected Tester createTester() {
-    return super.createTester().withCatalogReaderFactory(new TypeCoercionTest()
-        .getCatalogReaderFactory());
+    return super.createTester()
+        .withCatalogReaderFactory(
+            new TypeCoercionTest().getCatalogReaderFactory());
   }
 
   /** Test case for {@link TypeCoercion#commonTypeForBinaryComparison}. */
@@ -61,6 +62,14 @@ class TypeCoercionConverterTest extends SqlToRelTestBase {
         + "from (values (true, true, true))");
   }
 
+  @Test void testNotInOperation() {
+    checkPlanEquals("select\n"
+        + "1 not in ('1', '2', '3') as f0,\n"
+        + "(1, 2) not in (('1', '2')) as f1,\n"
+        + "(1, 2) not in (('1', '2'), ('3', '4')) as f2\n"
+        + "from (values (false, false, false))");
+  }
+
   /** Test cases for {@link TypeCoercion#inOperationCoercion}. */
   @Test void testInDateTimestamp() {
     checkPlanEquals("select (t1_timestamp, t1_date)\n"
@@ -68,8 +77,8 @@ class TypeCoercionConverterTest extends SqlToRelTestBase {
         + "from t1");
   }
 
-  /** Test cases for
-   * {@link org.apache.calcite.sql.validate.implicit.TypeCoercionImpl#booleanEquality}. */
+  /** Test case for
+   * {@link org.apache.calcite.sql.validate.implicit.TypeCoercionImpl}.{@code booleanEquality}. */
   @Test void testBooleanEquality() {
     // REVIEW Danny 2018-05-16: Now we do not support cast between numeric <-> boolean for
     // Calcite execution runtime, but we still add cast in the plan so other systems

@@ -140,7 +140,7 @@ public class SqlWindow extends SqlCall {
 
   //~ Methods ----------------------------------------------------------------
 
-  public SqlOperator getOperator() {
+  @Override public SqlOperator getOperator() {
     return SqlWindowOperator.INSTANCE;
   }
 
@@ -148,7 +148,7 @@ public class SqlWindow extends SqlCall {
     return SqlKind.WINDOW;
   }
 
-  public List<SqlNode> getOperandList() {
+  @Override public List<SqlNode> getOperandList() {
     return ImmutableNullableList.of(declName, refName, partitionList, orderList,
         isRows, lowerBound, upperBound, allowPartial);
   }
@@ -294,6 +294,7 @@ public class SqlWindow extends SqlCall {
     return windowCall;
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @see Util#deprecated(Object, boolean) */
   static void checkSpecialLiterals(SqlWindow window, SqlValidator validator) {
     final SqlNode lowerBound = window.getLowerBound();
@@ -525,6 +526,7 @@ public class SqlWindow extends SqlCall {
       SqlValidatorScope scope) {
     SqlValidatorScope operandScope = scope; // REVIEW
 
+    @SuppressWarnings("unused")
     SqlIdentifier declName = this.declName;
     SqlIdentifier refName = this.refName;
     SqlNodeList partitionList = this.partitionList;
@@ -535,7 +537,7 @@ public class SqlWindow extends SqlCall {
     SqlLiteral allowPartial = this.allowPartial;
 
     if (refName != null) {
-      SqlWindow win = validator.resolveWindow(this, operandScope, false);
+      SqlWindow win = validator.resolveWindow(this, operandScope);
       partitionList = win.partitionList;
       orderList = win.orderList;
       isRows = win.isRows;
@@ -674,7 +676,7 @@ public class SqlWindow extends SqlCall {
         if (boundVal instanceof SqlNumericLiteral) {
           final SqlNumericLiteral boundLiteral =
               (SqlNumericLiteral) boundVal;
-          if ((!boundLiteral.isExact())
+          if (!boundLiteral.isExact()
               || (boundLiteral.getScale() != 0)
               || (0 > boundLiteral.longValue(true))) {
             // true == throw if not exact (we just tested that - right?)
@@ -778,7 +780,7 @@ public class SqlWindow extends SqlCall {
    * An enumeration of types of bounds in a window: <code>CURRENT ROW</code>,
    * <code>UNBOUNDED PRECEDING</code>, and <code>UNBOUNDED FOLLOWING</code>.
    */
-  enum Bound {
+  enum Bound implements Symbolizable {
     CURRENT_ROW("CURRENT ROW"),
     UNBOUNDED_PRECEDING("UNBOUNDED PRECEDING"),
     UNBOUNDED_FOLLOWING("UNBOUNDED FOLLOWING");
@@ -789,16 +791,8 @@ public class SqlWindow extends SqlCall {
       this.sql = sql;
     }
 
-    public String toString() {
+    @Override public String toString() {
       return sql;
-    }
-
-    /**
-     * Creates a parse-tree node representing an occurrence of this bound
-     * type at a particular position in the parsed text.
-     */
-    public SqlNode symbol(SqlParserPos pos) {
-      return SqlLiteral.createSymbol(this, pos);
     }
   }
 
@@ -810,11 +804,11 @@ public class SqlWindow extends SqlCall {
       super("WINDOW", SqlKind.WINDOW, 2, true, null, null, null);
     }
 
-    public SqlSyntax getSyntax() {
+    @Override public SqlSyntax getSyntax() {
       return SqlSyntax.SPECIAL;
     }
 
-    public SqlCall createCall(
+    @Override public SqlCall createCall(
         SqlLiteral functionQualifier,
         SqlParserPos pos,
         SqlNode... operands) {
@@ -832,7 +826,7 @@ public class SqlWindow extends SqlCall {
           pos);
     }
 
-    public <R> void acceptCall(
+    @Override public <R> void acceptCall(
         SqlVisitor<R> visitor,
         SqlCall call,
         boolean onlyExpressions,
@@ -856,7 +850,7 @@ public class SqlWindow extends SqlCall {
       }
     }
 
-    public void unparse(
+    @Override public void unparse(
         SqlWriter writer,
         SqlCall call,
         int leftPrec,

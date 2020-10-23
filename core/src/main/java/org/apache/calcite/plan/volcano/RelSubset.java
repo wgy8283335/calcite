@@ -25,6 +25,7 @@ import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTrait;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.AbstractRelNode;
+import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.CorrelationId;
@@ -37,12 +38,13 @@ import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 import org.apache.calcite.util.trace.CalciteTrace;
 
+import com.google.common.collect.Sets;
+
 import org.apiguardian.api.API;
 import org.slf4j.Logger;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -50,7 +52,6 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -81,37 +82,30 @@ public class RelSubset extends AbstractRelNode {
 
   //~ Instance fields --------------------------------------------------------
 
-  /**
-   * Optimization task state
-   */
-  OptimizeTask.State taskState;
+  /** Optimization task state. */
+  OptimizeState taskState;
 
-  /**
-   * cost of best known plan (it may have improved since)
-   */
+  /** Cost of best known plan (it may have improved since). */
   RelOptCost bestCost;
 
-  /**
-   * The set this subset belongs to.
-   */
+  /** The set this subset belongs to. */
   final RelSet set;
 
-  /**
-   * best known plan
-   */
+  /** Best known plan. */
   RelNode best;
 
-  /**
-   * Timestamp for metadata validity
-   */
+  /** Timestamp for metadata validity. */
   long timestamp;
 
   /**
-   * Physical property state of current subset
-   * 0: logical operators, NONE convention is neither DELIVERED nor REQUIRED
-   * 1: traitSet DELIVERED from child operators or itself
-   * 2: traitSet REQUIRED from parent operators
-   * 3: both DELIVERED and REQUIRED
+   * Physical property state of current subset. Values:
+   *
+   * <ul>
+   * <li>0: logical operators, NONE convention is neither DELIVERED nor REQUIRED
+   * <li>1: traitSet DELIVERED from child operators or itself
+   * <li>2: traitSet REQUIRED from parent operators
+   * <li>3: both DELIVERED and REQUIRED
+   * </ul>
    */
   private int state = 0;
 
@@ -119,6 +113,25 @@ public class RelSubset extends AbstractRelNode {
    * This subset should trigger rules when it becomes delivered.
    */
   boolean triggerRule = false;
+
+  /**
+   * When the subset state is REQUIRED, whether enable property enforcing
+   * between this subset and other delivered subsets. When it is true,
+   * no enforcer operators will be added even if the other subset can't
+   * satisfy current subset's required traitSet.
+   */
+  private boolean enforceDisabled = false;
+
+  /**
+   * The upper bound of the last OptimizeGroup call.
+   */
+  RelOptCost upperBound;
+
+  /**
+   * A cache that recognize which RelNode has invoked the passThrough method
+   * so as to avoid duplicate invocation.
+   */
+  Set<RelNode> passThroughCache;
 
   //~ Constructors -----------------------------------------------------------
 
@@ -130,7 +143,7 @@ public class RelSubset extends AbstractRelNode {
     this.set = set;
     assert traits.allSimple();
     computeBestCost(cluster.getPlanner());
-    recomputeDigest();
+    upperBound = bestCost;
   }
 
   //~ Methods ----------------------------------------------------------------
@@ -144,7 +157,7 @@ public class RelSubset extends AbstractRelNode {
    * <ol>
    * <li>If the are no subsuming subsets, the subset is initially empty.</li>
    * <li>After creation, {@code best} and {@code bestCost} are maintained
-   *    incrementally by {@link #propagateCostImprovements0} and
+   *    incrementally by {@link VolcanoPlanner#propagateCostImprovements} and
    *    {@link RelSet#mergeWith(VolcanoPlanner, RelSet)}.</li>
    * </ol>
    */
@@ -180,6 +193,15 @@ public class RelSubset extends AbstractRelNode {
     return (state & REQUIRED) == REQUIRED;
   }
 
+  void disableEnforcing() {
+    assert isDelivered();
+    enforceDisabled = true;
+  }
+
+  boolean isEnforceDisabled() {
+    return enforceDisabled;
+  }
+
   public RelNode getBest() {
     return best;
   }
@@ -188,7 +210,7 @@ public class RelSubset extends AbstractRelNode {
     return set.rel;
   }
 
-  public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
+  @Override public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
     if (inputs.isEmpty()) {
       final RelTraitSet traitSet1 = traitSet.simplify();
       if (traitSet1.equals(this.traitSet)) {
@@ -199,11 +221,11 @@ public class RelSubset extends AbstractRelNode {
     throw new UnsupportedOperationException();
   }
 
-  public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
+  @Override public RelOptCost computeSelfCost(RelOptPlanner planner, RelMetadataQuery mq) {
     return planner.getCostFactory().makeZeroCost();
   }
 
-  public double estimateRowCount(RelMetadataQuery mq) {
+  @Override public double estimateRowCount(RelMetadataQuery mq) {
     if (best != null) {
       return mq.getRowCount(best);
     } else {
@@ -224,13 +246,12 @@ public class RelSubset extends AbstractRelNode {
     pw.done(input);
   }
 
-  @Override protected String computeDigest() {
-    StringBuilder digest = new StringBuilder("Subset#");
-    digest.append(set.id);
-    for (RelTrait trait : traitSet) {
-      digest.append('.').append(trait);
-    }
-    return digest.toString();
+  @Override public boolean deepEquals(Object obj) {
+    return this == obj;
+  }
+
+  @Override public int deepHashCode() {
+    return this.hashCode();
   }
 
   @Override protected RelDataType deriveRowType() {
@@ -352,75 +373,6 @@ public class RelSubset extends AbstractRelNode {
     return cheapest;
   }
 
-  /**
-   * Checks whether a relexp has made its subset cheaper, and if it so,
-   * propagate new cost to parent rel nodes using breadth first manner.
-   *
-   * @param planner   Planner
-   * @param mq        Metadata query
-   * @param rel       Relational expression whose cost has improved
-   * @param activeSet Set of active subsets, for cycle detection
-   */
-  void propagateCostImprovements(VolcanoPlanner planner, RelMetadataQuery mq,
-      RelNode rel, Set<RelSubset> activeSet) {
-    Queue<Pair<RelSubset, RelNode>> propagationQueue = new ArrayDeque<>();
-    for (RelSubset subset : set.subsets) {
-      if (rel.getTraitSet().satisfies(subset.traitSet)) {
-        propagationQueue.offer(Pair.of(subset, rel));
-      }
-    }
-
-    while (!propagationQueue.isEmpty()) {
-      Pair<RelSubset, RelNode> p = propagationQueue.poll();
-      p.left.propagateCostImprovements0(planner, mq, p.right, activeSet, propagationQueue);
-    }
-  }
-
-  void propagateCostImprovements0(VolcanoPlanner planner, RelMetadataQuery mq,
-      RelNode rel, Set<RelSubset> activeSet,
-      Queue<Pair<RelSubset, RelNode>> propagationQueue) {
-    ++timestamp;
-
-    if (!activeSet.add(this)) {
-      // This subset is already in the chain being propagated to. This
-      // means that the graph is cyclic, and therefore the cost of this
-      // relational expression - not this subset - must be infinite.
-      LOGGER.trace("cyclic: {}", this);
-      return;
-    }
-    try {
-      RelOptCost cost = planner.getCost(rel, mq);
-
-      // Update subset best cost when we find a cheaper rel or the current
-      // best's cost is changed
-      if (cost.isLt(bestCost)) {
-        LOGGER.trace("Subset cost changed: subset [{}] cost was {} now {}",
-            this, bestCost, cost);
-
-        bestCost = cost;
-        best = rel;
-        // since best was changed, cached metadata for this subset should be removed
-        mq.clearCache(this);
-
-        // Propagate cost change to parents
-        for (RelNode parent : getParents()) {
-          // removes parent cached metadata since its input was changed
-          mq.clearCache(parent);
-          final RelSubset parentSubset = planner.getSubset(parent);
-
-          // parent subset will clear its cache in propagateCostImprovements0 method itself
-          for (RelSubset subset : parentSubset.set.subsets) {
-            if (parent.getTraitSet().satisfies(subset.traitSet)) {
-              propagationQueue.offer(Pair.of(subset, parent));
-            }
-          }
-        }
-      }
-    } finally {
-      activeSet.remove(this);
-    }
-  }
-
   @Override public void collectVariablesUsed(Set<CorrelationId> variableSet) {
     variableSet.addAll(set.variablesUsed);
   }
@@ -472,6 +424,70 @@ public class RelSubset extends AbstractRelNode {
   public Stream<RelSubset> getSatisfyingSubsets() {
     return set.subsets.stream()
       .filter(s -> traitSet.satisfies(s.getTraitSet()));
+  }
+
+  /**
+   * Returns the best cost if this subset is fully optimized
+   * or null if the subset is not fully optimized.
+   */
+  @API(since = "1.24", status = API.Status.INTERNAL)
+  public RelOptCost getWinnerCost() {
+    if (taskState == OptimizeState.COMPLETED && bestCost.isLe(upperBound)) {
+      return bestCost;
+    }
+    // if bestCost != upperBound, it means optimize failed
+    return null;
+  }
+
+  void startOptimize(RelOptCost ub) {
+    assert getWinnerCost() == null : this + " is already optimized";
+    if (upperBound.isLt(ub)) {
+      upperBound = ub;
+      if (bestCost.isLt(upperBound)) {
+        upperBound = bestCost;
+      }
+    }
+    taskState = OptimizeState.OPTIMIZING;
+  }
+
+  void setOptimized() {
+    taskState = OptimizeState.COMPLETED;
+  }
+
+  boolean resetTaskState() {
+    boolean optimized = taskState != null;
+    taskState = null;
+    upperBound = bestCost;
+    return optimized;
+  }
+
+  RelNode passThrough(RelNode rel) {
+    if (!(rel instanceof PhysicalNode)) {
+      return null;
+    }
+    if (passThroughCache == null) {
+      passThroughCache = Sets.newIdentityHashSet();
+      passThroughCache.add(rel);
+    } else if (!passThroughCache.add(rel)) {
+      return null;
+    }
+    return ((PhysicalNode) rel).passThrough(this.getTraitSet());
+  }
+
+  boolean isExplored() {
+    return set.exploringState == RelSet.ExploringState.EXPLORED;
+  }
+
+  boolean explore() {
+    if (set.exploringState != null) {
+      return false;
+    }
+    set.exploringState = RelSet.ExploringState.EXPLORING;
+    return true;
+  }
+
+  void setExplored() {
+    set.exploringState = RelSet.ExploringState.EXPLORED;
   }
 
   //~ Inner Classes ----------------------------------------------------------
@@ -543,6 +559,10 @@ public class RelSubset extends AbstractRelNode {
       activeNodes.removeAll(p.getInputs());
       return false;
     }
+  }
+
+  @Override public String getDigest() {
+    return "RelSubset#" + set.id + '.' + getTraitSet();
   }
 
   /**
@@ -680,5 +700,11 @@ public class RelSubset extends AbstractRelNode {
       }
       return p;
     }
+  }
+
+  /** State of optimizer. */
+  enum OptimizeState {
+    OPTIMIZING,
+    COMPLETED
   }
 }

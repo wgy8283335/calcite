@@ -16,16 +16,30 @@
  */
 package org.apache.calcite.util;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+
 import org.hamcrest.Matcher;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import javax.annotation.Nonnull;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
+import static org.hamcrest.core.IsInstanceOf.instanceOf;
+import static org.hamcrest.core.IsNot.not;
 import static org.hamcrest.core.IsNull.nullValue;
+import static org.hamcrest.core.IsSame.sameInstance;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** Unit test for {@link ImmutableBeans}. */
@@ -253,6 +267,161 @@ class ImmutableBeanTest {
         .withChar('a').nTimes(2), is("aa"));
   }
 
+  @Test void testImmutableCollection() {
+    final List<String> list = Arrays.asList("Jimi", "Noel", "Mitch");
+    final List<String> immutableList = ImmutableList.copyOf(list);
+    final Set<String> set = new TreeSet<>(list);
+    final ImmutableSet<String> immutableSet = ImmutableSet.copyOf(set);
+    final Map<String, Integer> map = new HashMap<>();
+    list.forEach(name -> map.put(name, name.length()));
+    final ImmutableMap<String, Integer> immutableMap = ImmutableMap.copyOf(map);
+
+    final CollectionBean bean = ImmutableBeans.create(CollectionBean.class);
+
+    // list: the non-copying method never makes a copy
+    final List<String> list2 = bean.withList(list).list();
+    assertThat(list2, sameInstance(list));
+
+    // list: the copying method makes a copy if the original is not immutable
+    final List<String> list3 =
+        bean.withImmutableList(list).immutableList();
+    assertThat(list3, instanceOf(ImmutableList.class));
+    assertThat(list3, not(sameInstance(list)));
+    assertThat(list3, is(list));
+
+    // list: if the original is immutable, no need to make a copy
+    final List<String> list4 =
+        bean.withImmutableList(immutableList).immutableList();
+    assertThat(list4, sameInstance(immutableList));
+    assertThat(list3, not(sameInstance(list)));
+    assertThat(list3, is(list));
+
+    // list: empty
+    final List<String> emptyList = Collections.emptyList();
+    assertThat(bean.withImmutableList(emptyList).immutableList(),
+        is(emptyList));
+
+    // list: no need to copy the singleton list
+    final List<String> singletonList = Collections.singletonList("Elvis");
+    assertThat(bean.withImmutableList(singletonList).immutableList(),
+        is(singletonList));
+
+    final List<String> singletonNullList = Collections.singletonList(null);
+    assertThat(bean.withImmutableList(singletonNullList).immutableList(),
+        is(singletonNullList));
+
+    // set: the non-copying method never makes a copy
+    final Set<String> set2 = bean.withSet(set).set();
+    assertThat(set2, sameInstance(set));
+
+    // set: the copying method makes a copy if the original is not immutable
+    final Set<String> set3 =
+        bean.withImmutableSet(set).immutableSet();
+    assertThat(set3, instanceOf(ImmutableSet.class));
+    assertThat(set3, not(sameInstance(set)));
+    assertThat(set3, is(set));
+
+    // set: if the original is immutable, no need to make a copy
+    final Set<String> set4 =
+        bean.withImmutableSet(immutableSet).immutableSet();
+    assertThat(set4, sameInstance(immutableSet));
+    assertThat(set3, not(sameInstance(set)));
+    assertThat(set3, is(set));
+
+    // set: empty
+    final Set<String> emptySet = Collections.emptySet();
+    assertThat(bean.withImmutableSet(emptySet).immutableSet(),
+        is(emptySet));
+    assertThat(bean.withImmutableSet(emptySet).immutableSet(),
+        sameInstance(emptySet));
+
+    // set: other empty
+    final Set<String> emptySet2 = new HashSet<>();
+    assertThat(bean.withImmutableSet(emptySet2).immutableSet(),
+        is(emptySet));
+    assertThat(bean.withImmutableSet(emptySet2).immutableSet(),
+        instanceOf(ImmutableSet.class));
+
+    // set: singleton
+    final Set<String> singletonSet = Collections.singleton("Elvis");
+    assertThat(bean.withImmutableSet(singletonSet).immutableSet(),
+        is(singletonSet));
+    assertThat(bean.withImmutableSet(singletonSet).immutableSet(),
+        sameInstance(singletonSet));
+
+    // set: other singleton
+    final Set<String> singletonSet2 =
+        new HashSet<>(Collections.singletonList("Elvis"));
+    assertThat(bean.withImmutableSet(singletonSet2).immutableSet(),
+        is(singletonSet2));
+    assertThat(bean.withImmutableSet(singletonSet2).immutableSet(),
+        instanceOf(ImmutableSet.class));
+
+    // set: singleton null set
+    final Set<String> singletonNullSet = Collections.singleton(null);
+    assertThat(bean.withImmutableSet(singletonNullSet).immutableSet(),
+        is(singletonNullSet));
+    assertThat(bean.withImmutableSet(singletonNullSet).immutableSet(),
+        sameInstance(singletonNullSet));
+
+    // set: other singleton null set
+    final Set<String> singletonNullSet2 =
+        new HashSet<>(Collections.singleton(null));
+    assertThat(bean.withImmutableSet(singletonNullSet2).immutableSet(),
+        is(singletonNullSet2));
+    assertThat(bean.withImmutableSet(singletonNullSet2).immutableSet(),
+        instanceOf(ImmutableNullableSet.class));
+
+    // map: the non-copying method never makes a copy
+    final Map<String, Integer> map2 = bean.withMap(map).map();
+    assertThat(map2, sameInstance(map));
+
+    // map: the copying method makes a copy if the original is not immutable
+    final Map<String, Integer> map3 =
+        bean.withImmutableMap(map).immutableMap();
+    assertThat(map3, instanceOf(ImmutableMap.class));
+    assertThat(map3, not(sameInstance(map)));
+    assertThat(map3, is(map));
+
+    // map: if the original is immutable, no need to make a copy
+    final Map<String, Integer> map4 =
+        bean.withImmutableMap(immutableMap).immutableMap();
+    assertThat(map4, sameInstance(immutableMap));
+    assertThat(map3, not(sameInstance(map)));
+    assertThat(map3, is(map));
+
+    // map: no need to copy the empty map
+    final Map<String, Integer> emptyMap = Collections.emptyMap();
+    assertThat(bean.withImmutableMap(emptyMap).immutableMap(),
+        sameInstance(emptyMap));
+
+    // map: no need to copy the singleton map
+    final Map<String, Integer> singletonMap =
+        Collections.singletonMap("Elvis", "Elvis".length());
+    assertThat(bean.withImmutableMap(singletonMap).immutableMap(),
+        sameInstance(singletonMap));
+  }
+
+  @Test void testSubBean() {
+    assertThat(ImmutableBeans.create(SubBean.class)
+            .withBuzz(7).withBaz("x").withBar(true).toString(),
+        is("{Bar=true, Baz=x, Buzz=7}"));
+
+    assertThat(ImmutableBeans.create(MyBean.class)
+            .withBar(true).as(SubBean.class)
+            .withBuzz(7).withBaz("x").toString(),
+        is("{Bar=true, Baz=x, Buzz=7}"));
+
+    // Up-casting to MyBean does not discard value of sub-class property,
+    // "buzz". This is a feature, not a bug. It will allow us to down-cast
+    // later. (If we down-cast to a different sub-class where "buzz" has a
+    // different type, that would be a problem.)
+    assertThat(ImmutableBeans.create(SubBean.class)
+            .withBuzz(5).withBar(false).as(MyBean.class)
+            .withBaz("z").toString(),
+        is("{Bar=false, Baz=z, Buzz=5}"));
+  }
+
   /** Bean whose default value is not a valid value for the enum;
    * used in {@link #testValidate()}. */
   interface BeanWhoseDefaultIsBadEnumValue {
@@ -356,7 +525,11 @@ class ImmutableBeanTest {
     // TODO it is an error to declare an boolean property to be not required
 
   /** A simple bean with properties of various types, no defaults. */
-  interface MyBean {
+  public interface MyBean {
+    default <T> T as(Class<T> class_) {
+      return ImmutableBeans.copy(class_, this);
+    }
+
     @ImmutableBeans.Property
     int getFoo();
     MyBean withFoo(int x);
@@ -449,5 +622,49 @@ class ImmutableBeanTest {
     @ImmutableBeans.Property
     char getChar();
     BeanWithDefault withChar(char c);
+  }
+
+  /** A bean that extends another bean.
+   *
+   * <p>Its {@code with} methods return either the base interface
+   * or the derived interface.
+   */
+  public interface SubBean extends MyBean {
+    @ImmutableBeans.Property
+    int getBuzz();
+    SubBean withBuzz(int i);
+  }
+
+  /** A bean that has collection-valued properties. */
+  public interface CollectionBean {
+    @ImmutableBeans.Property(makeImmutable = false)
+    List<String> list();
+
+    CollectionBean withList(List<String> list);
+
+    @ImmutableBeans.Property(makeImmutable = true)
+    List<String> immutableList();
+
+    CollectionBean withImmutableList(List<String> list);
+
+    @ImmutableBeans.Property(makeImmutable = false)
+    Set<String> set();
+
+    CollectionBean withSet(Set<String> set);
+
+    @ImmutableBeans.Property(makeImmutable = true)
+    Set<String> immutableSet();
+
+    CollectionBean withImmutableSet(Set<String> set);
+
+    @ImmutableBeans.Property(makeImmutable = false)
+    Map<String, Integer> map();
+
+    CollectionBean withMap(Map<String, Integer> map);
+
+    @ImmutableBeans.Property(makeImmutable = true)
+    Map<String, Integer> immutableMap();
+
+    CollectionBean withImmutableMap(Map<String, Integer> map);
   }
 }

@@ -199,14 +199,6 @@ public abstract class Functions {
   }
 
   /**
-   * Converts a 1-parameter function to a predicate.
-   */
-  private static <T> Predicate1<T> toPredicate(
-      final Function1<T, Boolean> function) {
-    return function::apply;
-  }
-
-  /**
    * Returns the appropriate interface for a lambda function with
    * 1 argument and the given return type.
    *
@@ -268,11 +260,11 @@ public abstract class Functions {
   public static <T1, R> List<R> adapt(final List<T1> list,
       final Function1<T1, R> f) {
     return new AbstractList<R>() {
-      public R get(int index) {
+      @Override public R get(int index) {
         return f.apply(list.get(index));
       }
 
-      public int size() {
+      @Override public int size() {
         return list.size();
       }
     };
@@ -288,11 +280,11 @@ public abstract class Functions {
   public static <T, R> List<R> adapt(final T[] ts,
       final Function1<T, R> f) {
     return new AbstractList<R>() {
-      public R get(int index) {
+      @Override public R get(int index) {
         return f.apply(ts[index]);
       }
 
-      public int size() {
+      @Override public int size() {
         return ts.length;
       }
     };
@@ -313,6 +305,7 @@ public abstract class Functions {
   /** Returns a list that contains only elements of {@code list} that match
    * {@code predicate}. Avoids allocating a list if all elements match or no
    * elements match. */
+  @SuppressWarnings("MixedMutabilityReturnType")
   public static <E> List<E> filter(List<E> list, Predicate1<E> predicate) {
   sniff:
     {
@@ -438,6 +431,32 @@ public abstract class Functions {
   }
 
   /**
+   * Returns a {@link Comparator} that handles null values.
+   *
+   * @param nullsFirst Whether nulls come before all other values
+   * @param reverse Whether to reverse the usual order of {@link Comparable}s
+   * @param comparator Comparator to be used for comparison
+   */
+  @SuppressWarnings("unchecked")
+  public static <T extends Comparable<T>> Comparator<T> nullsComparator(
+      boolean nullsFirst,
+      boolean reverse,
+      Comparator<T> comparator) {
+    return (T o1, T o2) -> {
+      if (o1 == o2) {
+        return 0;
+      }
+      if (o1 == null) {
+        return nullsFirst ? -1 : 1;
+      }
+      if (o2 == null) {
+        return nullsFirst ? 1 : -1;
+      }
+      return reverse ? -comparator.compare(o1, o2) : comparator.compare(o1, o2);
+    };
+  }
+
+  /**
    * Returns an {@link EqualityComparer} that uses object identity and hash
    * code.
    */
@@ -465,11 +484,11 @@ public abstract class Functions {
   /** Array equality comparer. */
   private static class ArrayEqualityComparer
       implements EqualityComparer<Object[]> {
-    public boolean equal(Object[] v1, Object[] v2) {
+    @Override public boolean equal(Object[] v1, Object[] v2) {
       return Arrays.deepEquals(v1, v2);
     }
 
-    public int hashCode(Object[] t) {
+    @Override public int hashCode(Object[] t) {
       return Arrays.deepHashCode(t);
     }
   }
@@ -477,11 +496,11 @@ public abstract class Functions {
   /** Identity equality comparer. */
   private static class IdentityEqualityComparer
       implements EqualityComparer<Object> {
-    public boolean equal(Object v1, Object v2) {
+    @Override public boolean equal(Object v1, Object v2) {
       return Objects.equals(v1, v2);
     }
 
-    public int hashCode(Object t) {
+    @Override public int hashCode(Object t) {
       return t == null ? 0x789d : t.hashCode();
     }
   }
@@ -498,14 +517,14 @@ public abstract class Functions {
       this.selector = selector;
     }
 
-    public boolean equal(T v1, T v2) {
+    @Override public boolean equal(T v1, T v2) {
       return v1 == v2
           || v1 != null
           && v2 != null
           && Objects.equals(selector.apply(v1), selector.apply(v2));
     }
 
-    public int hashCode(T t) {
+    @Override public int hashCode(T t) {
       return t == null ? 0x789d : selector.apply(t).hashCode();
     }
   }
@@ -513,7 +532,7 @@ public abstract class Functions {
   /** Nulls first comparator. */
   private static class NullsFirstComparator
       implements Comparator<Comparable>, Serializable {
-    public int compare(Comparable o1, Comparable o2) {
+    @Override public int compare(Comparable o1, Comparable o2) {
       if (o1 == o2) {
         return 0;
       }
@@ -531,7 +550,7 @@ public abstract class Functions {
   /** Nulls last comparator. */
   private static class NullsLastComparator
       implements Comparator<Comparable>, Serializable {
-    public int compare(Comparable o1, Comparable o2) {
+    @Override public int compare(Comparable o1, Comparable o2) {
       if (o1 == o2) {
         return 0;
       }
@@ -549,7 +568,7 @@ public abstract class Functions {
   /** Nulls first reverse comparator. */
   private static class NullsFirstReverseComparator
       implements Comparator<Comparable>, Serializable  {
-    public int compare(Comparable o1, Comparable o2) {
+    @Override public int compare(Comparable o1, Comparable o2) {
       if (o1 == o2) {
         return 0;
       }
@@ -567,7 +586,7 @@ public abstract class Functions {
   /** Nulls last reverse comparator. */
   private static class NullsLastReverseComparator
       implements Comparator<Comparable>, Serializable  {
-    public int compare(Comparable o1, Comparable o2) {
+    @Override public int compare(Comparable o1, Comparable o2) {
       if (o1 == o2) {
         return 0;
       }
@@ -589,15 +608,15 @@ public abstract class Functions {
    * @param <T1> second argument type */
   private static final class Ignore<R, T0, T1>
       implements Function0<R>, Function1<T0, R>, Function2<T0, T1, R> {
-    public R apply() {
+    @Override public R apply() {
       return null;
     }
 
-    public R apply(T0 p0) {
+    @Override public R apply(T0 p0) {
       return null;
     }
 
-    public R apply(T0 p0, T1 p1) {
+    @Override public R apply(T0 p0, T1 p1) {
       return null;
     }
 
@@ -617,11 +636,11 @@ public abstract class Functions {
       this.fn = fn;
     }
 
-    public int size() {
+    @Override public int size() {
       return size;
     }
 
-    public E get(int index) {
+    @Override public E get(int index) {
       return fn.apply(index);
     }
   }

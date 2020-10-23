@@ -101,6 +101,16 @@ class BabelQuidemTest extends QuidemTest {
                   SqlConformanceEnum.BABEL)
               .with(CalciteConnectionProperty.LENIENT_OPERATOR_LOOKUP, true)
               .connect();
+        case "scott-big-query":
+          return CalciteAssert.that()
+              .with(CalciteAssert.Config.SCOTT)
+              .with(CalciteConnectionProperty.FUN, "standard,bigquery")
+              .with(CalciteConnectionProperty.PARSER_FACTORY,
+                  SqlBabelParserImpl.class.getName() + "#FACTORY")
+              .with(CalciteConnectionProperty.CONFORMANCE,
+                  SqlConformanceEnum.BABEL)
+              .with(CalciteConnectionProperty.LENIENT_OPERATOR_LOOKUP, true)
+              .connect();
         default:
           return super.connect(name, reference);
         }
@@ -128,9 +138,8 @@ class BabelQuidemTest extends QuidemTest {
     @Override public void execute(Context x, boolean execute) throws Exception {
       if (execute) {
         // use Babel parser
-        final SqlParser.ConfigBuilder parserConfig =
-            SqlParser.configBuilder()
-                .setParserFactory(SqlBabelParserImpl.FACTORY);
+        final SqlParser.Config parserConfig =
+            SqlParser.config().withParserFactory(SqlBabelParserImpl.FACTORY);
 
         // extract named schema from connection and use it in planner
         final CalciteConnection calciteConnection =
@@ -143,7 +152,7 @@ class BabelQuidemTest extends QuidemTest {
         final Frameworks.ConfigBuilder config =
             Frameworks.newConfigBuilder()
                 .defaultSchema(schema)
-                .parserConfig(parserConfig.build())
+                .parserConfig(parserConfig)
                 .context(Contexts.of(calciteConnection.config()));
 
         // parse, validate and un-parse

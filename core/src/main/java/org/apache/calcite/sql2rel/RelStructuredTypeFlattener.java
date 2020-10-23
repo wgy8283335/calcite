@@ -91,7 +91,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.SortedMap;
 import java.util.SortedSet;
-import java.util.stream.Collectors;
 
 // TODO jvs 10-Feb-2005:  factor out generic rewrite helper, with the
 // ability to map between old and new rels and field ordinals.  Also,
@@ -141,6 +140,7 @@ public class RelStructuredTypeFlattener implements ReflectiveVisitor {
   private final Map<RelNode, RelNode> oldToNewRelMap = new HashMap<>();
   private RelNode currentRel;
   private int iRestructureInput;
+  @SuppressWarnings("unused")
   private RelDataType flattenedRootType;
   boolean restructured;
   private final RelOptTable.ToRelContext toRelContext;
@@ -180,6 +180,7 @@ public class RelStructuredTypeFlattener implements ReflectiveVisitor {
     }
   }
 
+  @SuppressWarnings({"JdkObsolete", "ModifyCollectionInEnhancedForLoop"})
   public void updateRelInMap(
       SortedMap<CorrelationId, LogicalCorrelate> mapCorVarToCorRel) {
     for (CorrelationId corVar : mapCorVarToCorRel.keySet()) {
@@ -688,10 +689,8 @@ public class RelStructuredTypeFlattener implements ReflectiveVisitor {
             }
           }
         } else {
-          List<RexNode> newOperands = operands.stream()
-              .map(op -> op.accept(shuttle))
-              .collect(Collectors.toList());
-          newExp = rexBuilder.makeCall(exp.getType(), operator, newOperands);
+          newExp = rexBuilder.makeCall(exp.getType(), operator,
+              shuttle.visitList(operands));
           // flatten call result type
           flattenResultTypeOfRexCall(newExp, fieldName, flattenedExps);
         }
@@ -710,7 +709,7 @@ public class RelStructuredTypeFlattener implements ReflectiveVisitor {
     int nameIdx = 0;
     for (RelDataTypeField field : newExp.getType().getFieldList()) {
       RexNode fieldRef = rexBuilder.makeFieldAccess(newExp, field.getIndex());
-      String fieldRefName = fieldName + "$" + (nameIdx++);
+      String fieldRefName = fieldName + "$" + nameIdx++;
       if (fieldRef.getType().isStruct()) {
         flattenResultTypeOfRexCall(fieldRef, fieldRefName, flattenedExps);
       } else {
@@ -739,7 +738,7 @@ public class RelStructuredTypeFlattener implements ReflectiveVisitor {
     }
     RexCall call = (RexCall) rexNode;
     return call.getOperator().getName().equalsIgnoreCase("row")
-        || (call.isA(SqlKind.NEW_SPECIFICATION));
+        || call.isA(SqlKind.NEW_SPECIFICATION);
   }
 
   public void rewriteRel(TableScan rel) {

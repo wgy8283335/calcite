@@ -29,6 +29,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceAccessMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -46,6 +47,7 @@ import java.util.Map;
 /**
  * Testing Elasticsearch aggregation transformations.
  */
+@Disabled("RestClient often timeout in PR CI")
 @ResourceLock(value = "elasticsearch-scrolls", mode = ResourceAccessMode.READ)
 class AggregationTest {
 
@@ -230,9 +232,8 @@ class AggregationTest {
             "cat1=b; cat3=z; EXPR$2=7.0; EXPR$3=42.0");
   }
 
-  /**
-   * Testing {@link org.apache.calcite.sql.SqlKind#ANY_VALUE} aggregate function
-   */
+  /** Tests the {@link org.apache.calcite.sql.SqlKind#ANY_VALUE} aggregate
+   * function. */
   @Test void anyValue() {
     CalciteAssert.that()
         .with(newConnectionFactory())
@@ -344,9 +345,8 @@ class AggregationTest {
                           "cat1=null; EXPR$1=1");
   }
 
-  /**
-   * {@code select max(cast(_MAP['foo'] as integer)) from tbl}
-   */
+  /** Tests aggregation with cast,
+   * {@code select max(cast(_MAP['foo'] as integer)) from tbl}. */
   @Test void aggregationWithCast() {
     CalciteAssert.that()
         .with(newConnectionFactory())

@@ -184,18 +184,31 @@ public final class LogicalJoin extends Join {
     return shuttle.visit(this);
   }
 
-  public RelWriter explainTerms(RelWriter pw) {
+  @Override public RelWriter explainTerms(RelWriter pw) {
     // Don't ever print semiJoinDone=false. This way, we
     // don't clutter things up in optimizers that don't use semi-joins.
     return super.explainTerms(pw)
         .itemIf("semiJoinDone", semiJoinDone, semiJoinDone);
   }
 
+  @Override public boolean deepEquals(Object obj) {
+    if (this == obj) {
+      return true;
+    }
+    return deepEquals0(obj)
+        && semiJoinDone == ((LogicalJoin) obj).semiJoinDone
+        && systemFieldList.equals(((LogicalJoin) obj).systemFieldList);
+  }
+
+  @Override public int deepHashCode() {
+    return Objects.hash(deepHashCode0(), semiJoinDone, systemFieldList);
+  }
+
   @Override public boolean isSemiJoinDone() {
     return semiJoinDone;
   }
 
-  public List<RelDataTypeField> getSystemFieldList() {
+  @Override public List<RelDataTypeField> getSystemFieldList() {
     return systemFieldList;
   }
 

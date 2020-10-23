@@ -18,7 +18,6 @@ package org.apache.calcite.rel.externalize;
 
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
-import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.util.JsonBuilder;
 import org.apache.calcite.util.Pair;
@@ -97,32 +96,20 @@ public class RelJsonWriter implements RelWriter {
     return list;
   }
 
-  public final void explain(RelNode rel, List<Pair<String, Object>> valueList) {
+  @Override public final void explain(RelNode rel, List<Pair<String, Object>> valueList) {
     explain_(rel, valueList);
   }
 
-  public SqlExplainLevel getDetailLevel() {
+  @Override public SqlExplainLevel getDetailLevel() {
     return SqlExplainLevel.ALL_ATTRIBUTES;
   }
 
-  public RelWriter item(String term, Object value) {
+  @Override public RelWriter item(String term, Object value) {
     values.add(Pair.of(term, value));
     return this;
   }
 
-  private List<Object> getList(List<Pair<String, Object>> values, String tag) {
-    for (Pair<String, Object> value : values) {
-      if (value.left.equals(tag)) {
-        //noinspection unchecked
-        return (List<Object>) value.right;
-      }
-    }
-    final List<Object> list = new ArrayList<>();
-    values.add(Pair.of(tag, (Object) list));
-    return list;
-  }
-
-  public RelWriter done(RelNode node) {
+  @Override public RelWriter done(RelNode node) {
     final List<Pair<String, Object>> valuesCopy =
         ImmutableList.copyOf(values);
     values.clear();
@@ -141,8 +128,6 @@ public class RelJsonWriter implements RelWriter {
   public String asString() {
     final Map<String, Object> map = jsonBuilder.map();
     map.put("rels", relList);
-    try (RexNode.Closeable ignored = withRexNormalize()) {
-      return jsonBuilder.toJsonString(map);
-    }
+    return jsonBuilder.toJsonString(map);
   }
 }

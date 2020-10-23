@@ -402,6 +402,11 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
   public static final SqlBinaryOperator NOT_IN =
       new SqlInOperator(SqlKind.NOT_IN);
 
+  /** Operator that tests whether its left operand is included in the range of
+   * values covered by search arguments. */
+  public static final SqlInternalOperator SEARCH =
+      new SqlSearchOperator();
+
   /**
    * The <code>&lt; SOME</code> operator (synonymous with
    * <code>&lt; ANY</code>).
@@ -546,6 +551,12 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    */
   public static final SqlSpecialOperator DATETIME_PLUS =
       new SqlDatetimePlusOperator();
+
+  /**
+   * Interval expression, '<code>INTERVAL n timeUnit</code>'.
+   */
+  public static final SqlSpecialOperator INTERVAL =
+      new SqlIntervalOperator();
 
   /**
    * Multiset {@code MEMBER OF}, which returns whether a element belongs to a
@@ -828,7 +839,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           ReturnTypes.BOOLEAN,
           null,
           OperandTypes.ANY) {
-        public boolean argumentMustBeScalar(int ordinal) {
+        @Override public boolean argumentMustBeScalar(int ordinal) {
           return false;
         }
 
@@ -1427,7 +1438,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    * <ol>
    * <li>name of window function ({@link org.apache.calcite.sql.SqlCall})</li>
    * <li>window name ({@link org.apache.calcite.sql.SqlLiteral}) or window
-   * in-line specification (@link SqlWindowOperator})</li>
+   * in-line specification ({@code org.apache.calcite.sql.SqlWindow.SqlWindowOperator})</li>
    * </ol>
    */
   public static final SqlBinaryOperator OVER = new SqlOverOperator();
@@ -1443,7 +1454,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    */
   public static final SqlSpecialOperator REINTERPRET =
       new SqlSpecialOperator("Reinterpret", SqlKind.REINTERPRET) {
-        public SqlOperandCountRange getOperandCountRange() {
+        @Override public SqlOperandCountRange getOperandCountRange() {
           return SqlOperandCountRanges.between(1, 2);
         }
       };
@@ -1753,7 +1764,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           null,
           OperandTypes.NILADIC,
           SqlFunctionCategory.NUMERIC) {
-        public SqlSyntax getSyntax() {
+        @Override public SqlSyntax getSyntax() {
           return SqlSyntax.FUNCTION_ID;
         }
       };
@@ -2122,14 +2133,12 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           ReturnTypes.MULTISET_RECORD,
           null,
           OperandTypes.MULTISET) {
-        public void unparse(
+        @Override public void unparse(
             SqlWriter writer,
             SqlCall call,
             int leftPrec,
             int rightPrec) {
-          SqlUtil.unparseFunctionSyntax(
-              this,
-              writer, call);
+          SqlUtil.unparseFunctionSyntax(this, writer, call, false);
         }
       };
 
@@ -2147,7 +2156,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           ReturnTypes.RECORD_TO_SCALAR,
           null,
           OperandTypes.RECORD_TO_SCALAR) {
-        public void unparse(
+        @Override public void unparse(
             SqlWriter writer,
             SqlCall call,
             int leftPrec,
@@ -2157,7 +2166,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           writer.endList(frame);
         }
 
-        public boolean argumentMustBeScalar(int ordinal) {
+        @Override public boolean argumentMustBeScalar(int ordinal) {
           // Obvious, really.
           return false;
         }
@@ -2202,18 +2211,10 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       };
 
   /**
-   * The LISTAGG operator. Multiset aggregator function.
+   * The LISTAGG operator. String aggregator function.
    */
   public static final SqlAggFunction LISTAGG =
-      new SqlAggFunction("LISTAGG",
-          null,
-          SqlKind.LISTAGG,
-          ReturnTypes.ARG0_NULLABLE,
-          null,
-          OperandTypes.or(OperandTypes.STRING, OperandTypes.STRING_STRING),
-          SqlFunctionCategory.SYSTEM, false, false,
-          Optionality.OPTIONAL) {
-      };
+      new SqlListaggAggFunction(SqlKind.LISTAGG, ReturnTypes.ARG0_NULLABLE);
 
   /**
    * The FUSION operator. Multiset aggregator function.
@@ -2240,16 +2241,13 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           SqlFunctionCategory.SYSTEM, false, false,
           Optionality.FORBIDDEN) {
       };
-  /**
-   * The sequence next value function: <code>NEXT VALUE FOR sequence</code>
-   */
+
+  /** The sequence next value function: <code>NEXT VALUE FOR sequence</code>. */
   public static final SqlOperator NEXT_VALUE =
       new SqlSequenceValueOperator(SqlKind.NEXT_VALUE);
 
-  /**
-   * The sequence current value function: <code>CURRENT VALUE FOR
-   * sequence</code>
-   */
+  /** The sequence current value function: <code>CURRENT VALUE FOR
+   * sequence</code>. */
   public static final SqlOperator CURRENT_VALUE =
       new SqlSequenceValueOperator(SqlKind.CURRENT_VALUE);
 
@@ -2281,7 +2279,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
           ReturnTypes.ARG0,
           null,
           OperandTypes.VARIADIC) {
-        public void unparse(
+        @Override public void unparse(
             SqlWriter writer,
             SqlCall call,
             int leftPrec,
@@ -2592,6 +2590,26 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       return ALL_GE;
     default:
       throw new AssertionError(comparisonKind);
+    }
+  }
+
+  /** Returns the binary operator that corresponds to this operator but in the opposite
+   * direction. Or returns this, if its kind is not reversible.
+   *
+   * <p>For example, {@code reverse(GREATER_THAN)} returns {@link #LESS_THAN}.
+   */
+  public static SqlOperator reverse(SqlOperator operator) {
+    switch (operator.getKind()) {
+    case GREATER_THAN:
+      return LESS_THAN;
+    case GREATER_THAN_OR_EQUAL:
+      return LESS_THAN_OR_EQUAL;
+    case LESS_THAN:
+      return GREATER_THAN;
+    case LESS_THAN_OR_EQUAL:
+      return GREATER_THAN_OR_EQUAL;
+    default:
+      return operator;
     }
   }
 

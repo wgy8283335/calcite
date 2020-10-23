@@ -130,6 +130,7 @@ class Step extends DefaultEdge {
 
   /** Temporary method. We should use (inferred) primary keys to figure out
    * the direction of steps. */
+  @SuppressWarnings("unused")
   private double cardinality(SqlStatisticProvider statisticProvider,
       LatticeTable table) {
     return statisticProvider.tableCardinality(table.t);
@@ -144,11 +145,11 @@ class Step extends DefaultEdge {
       this.space = Objects.requireNonNull(space);
     }
 
-    public Step createEdge(LatticeTable source, LatticeTable target) {
+    @Override public Step createEdge(LatticeTable source, LatticeTable target) {
       throw new UnsupportedOperationException();
     }
 
-    public Step createEdge(LatticeTable source, LatticeTable target,
+    @Override public Step createEdge(LatticeTable source, LatticeTable target,
         Object... attributes) {
       @SuppressWarnings("unchecked") final List<IntPair> keys =
           (List) attributes[0];

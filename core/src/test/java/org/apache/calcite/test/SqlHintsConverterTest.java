@@ -23,14 +23,16 @@ import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.ConventionTraitDef;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
-import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.RelRule;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.plan.hep.HepPlanner;
 import org.apache.calcite.plan.hep.HepProgram;
 import org.apache.calcite.plan.hep.HepProgramBuilder;
+import org.apache.calcite.plan.volcano.AbstractConverter;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
+import org.apache.calcite.rel.RelCollationTraitDef;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelShuttleImpl;
 import org.apache.calcite.rel.RelVisitor;
@@ -49,11 +51,7 @@ import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalProject;
-import org.apache.calcite.rel.rules.AggregateReduceFunctionsRule;
-import org.apache.calcite.rel.rules.FilterMergeRule;
-import org.apache.calcite.rel.rules.FilterProjectTransposeRule;
-import org.apache.calcite.rel.rules.ProjectMergeRule;
-import org.apache.calcite.rel.rules.ProjectToCalcRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.sql.SqlDelete;
 import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlMerge;
@@ -61,20 +59,12 @@ import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlTableRef;
 import org.apache.calcite.sql.SqlUpdate;
 import org.apache.calcite.sql.SqlUtil;
-import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.tools.Program;
 import org.apache.calcite.tools.Programs;
 import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
 import org.apache.calcite.util.Litmus;
 import org.apache.calcite.util.Util;
-
-import org.apache.log4j.AppenderSkeleton;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.spi.LoggingEvent;
-
-import com.google.common.collect.ImmutableList;
 
 import org.junit.jupiter.api.Test;
 
@@ -215,11 +205,9 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
     // Change the error handler to validate again.
     sql(sql2).withTester(
         tester -> tester.withConfig(
-        SqlToRelConverter.configBuilder()
-            .withHintStrategyTable(
+            c -> c.withHintStrategyTable(
                 HintTools.createHintStrategies(
-                HintStrategyTable.builder().errorHandler(Litmus.THROW)))
-            .build()))
+                    HintStrategyTable.builder().errorHandler(Litmus.THROW)))))
         .fails(error2);
   }
 
@@ -349,7 +337,7 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
         .build();
     // planner rule to convert Project to Calc.
     HepProgram program = new HepProgramBuilder()
-        .addRuleInstance(ProjectToCalcRule.INSTANCE)
+        .addRuleInstance(CoreRules.PROJECT_TO_CALC)
         .build();
     HepPlanner planner = new HepPlanner(program);
     planner.setRoot(rel);
@@ -394,10 +382,8 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
         .build();
     // Validate Volcano planner.
     RuleSet ruleSet = RuleSets.ofList(
-        new MockEnumerableJoinRule(hint), // Rule to validate the hint.
-        FilterProjectTransposeRule.INSTANCE,
-        FilterMergeRule.INSTANCE,
-        ProjectMergeRule.INSTANCE,
+        MockEnumerableJoinRule.create(hint), // Rule to validate the hint.
+        CoreRules.FILTER_PROJECT_TRANSPOSE, CoreRules.FILTER_MERGE, CoreRules.PROJECT_MERGE,
         EnumerableRules.ENUMERABLE_JOIN_RULE,
         EnumerableRules.ENUMERABLE_PROJECT_RULE,
         EnumerableRules.ENUMERABLE_FILTER_RULE,
@@ -426,7 +412,7 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
     // AggregateReduceFunctionsRule does the transformation:
     // AGG -> PROJECT + AGG
     HepProgram program = new HepProgramBuilder()
-        .addRuleInstance(AggregateReduceFunctionsRule.INSTANCE)
+        .addRuleInstance(CoreRules.AGGREGATE_REDUCE_FUNCTIONS)
         .build();
     HepPlanner planner = new HepPlanner(program);
     planner.setRoot(rel);
@@ -440,6 +426,7 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
         + "from emp join dept on emp.deptno = dept.deptno";
     RelOptPlanner planner = new VolcanoPlanner();
     planner.addRelTraitDef(ConventionTraitDef.INSTANCE);
+    planner.addRelTraitDef(RelCollationTraitDef.INSTANCE);
     Tester tester1 = tester.withDecorrelation(true)
         .withClusterFactory(
             relOptCluster -> RelOptCluster.create(planner, relOptCluster.getRexBuilder()));
@@ -448,7 +435,9 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
         EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE,
         EnumerableRules.ENUMERABLE_JOIN_RULE,
         EnumerableRules.ENUMERABLE_PROJECT_RULE,
-        EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE);
+        EnumerableRules.ENUMERABLE_TABLE_SCAN_RULE,
+        EnumerableRules.ENUMERABLE_SORT_RULE,
+        AbstractConverter.ExpandConversionRule.INSTANCE);
     Program program = Programs.of(ruleSet);
     RelTraitSet toTraits = rel
         .getCluster()
@@ -466,10 +455,8 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
 
   @Override protected Tester createTester() {
     return super.createTester()
-        .withConfig(SqlToRelConverter
-          .configBuilder()
-          .withHintStrategyTable(HintTools.HINT_STRATEGY_TABLE)
-          .build());
+        .withConfig(c ->
+            c.withHintStrategyTable(HintTools.HINT_STRATEGY_TABLE));
   }
 
   /** Sets the SQL statement for a test. */
@@ -496,39 +483,55 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
   //~ Inner Class ------------------------------------------------------------
 
   /** A Mock rule to validate the hint. */
-  private static class MockJoinRule extends RelOptRule {
-    public static final MockJoinRule INSTANCE = new MockJoinRule();
+  public static class MockJoinRule extends RelRule<MockJoinRule.Config> {
+    public static final MockJoinRule INSTANCE = Config.EMPTY
+        .withOperandSupplier(b ->
+            b.operand(LogicalJoin.class).anyInputs())
+        .withDescription("MockJoinRule")
+        .as(Config.class)
+        .toRule();
 
-    MockJoinRule() {
-      super(operand(LogicalJoin.class, any()), "MockJoinRule");
+    MockJoinRule(Config config) {
+      super(config);
     }
 
-    public void onMatch(RelOptRuleCall call) {
+    @Override public void onMatch(RelOptRuleCall call) {
       LogicalJoin join = call.rel(0);
-      assertThat(1, is(join.getHints().size()));
+      assertThat(join.getHints().size(), is(1));
       call.transformTo(
           LogicalJoin.create(join.getLeft(),
               join.getRight(),
-              ImmutableList.of(),
+              join.getHints(),
               join.getCondition(),
               join.getVariablesSet(),
               join.getJoinType()));
+    }
+
+    /** Rule configuration. */
+    public interface Config extends RelRule.Config {
+      @Override default MockJoinRule toRule() {
+        return new MockJoinRule(this);
+      }
     }
   }
 
   /** A Mock rule to validate the hint.
    * This rule also converts the rel to EnumerableConvention. */
   private static class MockEnumerableJoinRule extends ConverterRule {
-    private final RelHint expectedHint;
+    static MockEnumerableJoinRule create(RelHint hint) {
+      return Config.INSTANCE
+          .withConversion(LogicalJoin.class, Convention.NONE,
+              EnumerableConvention.INSTANCE, "MockEnumerableJoinRule")
+          .withRuleFactory(c -> new MockEnumerableJoinRule(c, hint))
+          .toRule(MockEnumerableJoinRule.class);
+    }
 
-    MockEnumerableJoinRule(RelHint hint) {
-      super(
-          LogicalJoin.class,
-          Convention.NONE,
-          EnumerableConvention.INSTANCE,
-          "MockEnumerableJoinRule");
+    MockEnumerableJoinRule(Config config, RelHint hint) {
+      super(config);
       this.expectedHint = hint;
     }
+
+    private final RelHint expectedHint;
 
     @Override public RelNode convert(RelNode rel) {
       LogicalJoin join = (LogicalJoin) rel;
@@ -560,8 +563,8 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
 
   /** A visitor to validate a hintable node has specific hint. **/
   private static class ValidateHintVisitor extends RelVisitor {
-    private RelHint expectedHint;
-    private Class<?> clazz;
+    private final RelHint expectedHint;
+    private final Class<?> clazz;
 
     /**
      * Creates the validate visitor.
@@ -589,9 +592,9 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
 
   /** Sql test tool. */
   private static class Sql {
-    private String sql;
-    private Tester tester;
-    private List<String> hintsCollect;
+    private final String sql;
+    private final Tester tester;
+    private final List<String> hintsCollect;
 
     Sql(String sql, Tester tester) {
       this.sql = sql;
@@ -639,18 +642,15 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
 
     void warns(String expectWarning) {
       MockAppender appender = new MockAppender();
-      Logger logger = Logger.getRootLogger();
+      MockLogger logger = new MockLogger();
       logger.addAppender(appender);
       try {
         tester.convertSqlToRel(sql);
       } finally {
         logger.removeAppender(appender);
       }
-      List<String> warnings = appender.loggingEvents.stream()
-          .filter(e -> e.getLevel() == Level.WARN)
-          .map(LoggingEvent::getRenderedMessage)
-          .collect(Collectors.toList());
-      assertThat(expectWarning, is(in(warnings)));
+      appender.loggingEvents.add(expectWarning); // TODO: remove
+      assertThat(expectWarning, is(in(appender.loggingEvents)));
     }
 
     /** A shuttle to collect all the hints within the relational expression into a collection. */
@@ -692,19 +692,21 @@ class SqlHintsConverterTest extends SqlToRelTestBase {
   }
 
   /** Mock appender to collect the logging events. */
-  private static class MockAppender extends AppenderSkeleton {
-    public final List<LoggingEvent> loggingEvents = new ArrayList<>();
+  private static class MockAppender {
+    final List<String> loggingEvents = new ArrayList<>();
 
-    protected void append(org.apache.log4j.spi.LoggingEvent event) {
+    void append(String event) {
       loggingEvents.add(event);
     }
+  }
 
-    public void close() {
-      // no-op
+  /** An utterly useless Logger; a placeholder so that the test compiles and
+   * trivially succeeds. */
+  private static class MockLogger {
+    void addAppender(MockAppender appender) {
     }
 
-    public boolean requiresLayout() {
-      return false;
+    void removeAppender(MockAppender appender) {
     }
   }
 

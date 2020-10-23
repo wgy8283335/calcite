@@ -66,6 +66,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -88,7 +89,7 @@ public class RelMdCollation
 
   //~ Methods ----------------------------------------------------------------
 
-  public MetadataDef<BuiltInMetadata.Collation> getDef() {
+  @Override public MetadataDef<BuiltInMetadata.Collation> getDef() {
     return BuiltInMetadata.Collation.DEF;
   }
 
@@ -112,17 +113,21 @@ public class RelMdCollation
    */
   public ImmutableList<RelCollation> collations(RelNode rel,
       RelMetadataQuery mq) {
-    return ImmutableList.of();
+    return null;
+  }
+
+  private static <E> ImmutableList<E> copyOf(Collection<? extends E> values) {
+    return values == null ? null : ImmutableList.copyOf(values);
   }
 
   public ImmutableList<RelCollation> collations(Window rel,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(window(mq, rel.getInput(), rel.groups));
+    return copyOf(window(mq, rel.getInput(), rel.groups));
   }
 
   public ImmutableList<RelCollation> collations(Match rel,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         match(mq, rel.getInput(), rel.getRowType(), rel.getPattern(),
             rel.isStrictStart(), rel.isStrictEnd(),
             rel.getPatternDefinitions(), rel.getMeasures(), rel.getAfter(),
@@ -142,14 +147,14 @@ public class RelMdCollation
 
   public ImmutableList<RelCollation> collations(TableScan scan,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(table(scan.getTable()));
+    return copyOf(table(scan.getTable()));
   }
 
   public ImmutableList<RelCollation> collations(EnumerableMergeJoin join,
       RelMetadataQuery mq) {
     // In general a join is not sorted. But a merge join preserves the sort
     // order of the left and right sides.
-    return ImmutableList.copyOf(
+    return copyOf(
         RelMdCollation.mergeJoin(mq, join.getLeft(), join.getRight(),
             join.analyzeCondition().leftKeys, join.analyzeCondition().rightKeys,
             join.getJoinType()));
@@ -157,50 +162,50 @@ public class RelMdCollation
 
   public ImmutableList<RelCollation> collations(EnumerableHashJoin join,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         RelMdCollation.enumerableHashJoin(mq, join.getLeft(), join.getRight(), join.getJoinType()));
   }
 
   public ImmutableList<RelCollation> collations(EnumerableNestedLoopJoin join,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         RelMdCollation.enumerableNestedLoopJoin(mq, join.getLeft(), join.getRight(),
             join.getJoinType()));
   }
 
   public ImmutableList<RelCollation> collations(EnumerableCorrelate join,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         RelMdCollation.enumerableCorrelate(mq, join.getLeft(), join.getRight(),
             join.getJoinType()));
   }
 
   public ImmutableList<RelCollation> collations(Sort sort,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         RelMdCollation.sort(sort.getCollation()));
   }
 
   public ImmutableList<RelCollation> collations(SortExchange sort,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         RelMdCollation.sort(sort.getCollation()));
   }
 
   public ImmutableList<RelCollation> collations(Project project,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         project(mq, project.getInput(), project.getProjects()));
   }
 
   public ImmutableList<RelCollation> collations(Calc calc,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(calc(mq, calc.getInput(), calc.getProgram()));
+    return copyOf(calc(mq, calc.getInput(), calc.getProgram()));
   }
 
   public ImmutableList<RelCollation> collations(Values values,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         values(mq, values.getRowType(), values.getTuples()));
   }
 
@@ -216,7 +221,7 @@ public class RelMdCollation
 
   public ImmutableList<RelCollation> collations(RelSubset rel,
       RelMetadataQuery mq) {
-    return ImmutableList.copyOf(
+    return copyOf(
         Objects.requireNonNull(
             rel.getTraitSet().getTraits(RelCollationTraitDef.INSTANCE)));
   }
@@ -269,7 +274,7 @@ public class RelMdCollation
   /** Helper method to determine a {@link Project}'s collation. */
   public static List<RelCollation> project(RelMetadataQuery mq,
       RelNode input, List<? extends RexNode> projects) {
-    final SortedSet<RelCollation> collations = new TreeSet<>();
+    final NavigableSet<RelCollation> collations = new TreeSet<>();
     final List<RelCollation> inputCollations = mq.collations(input);
     if (inputCollations == null || inputCollations.isEmpty()) {
       return ImmutableList.of();
@@ -326,7 +331,7 @@ public class RelMdCollation
       collations.add(RelCollations.of(fieldCollationsForRexCalls));
     }
 
-    return ImmutableList.copyOf(collations);
+    return copyOf(collations);
   }
 
   /** Helper method to determine a
@@ -405,14 +410,14 @@ public class RelMdCollation
     return list;
   }
 
-  private static Ordering<List<RexLiteral>> comparator(
+  public static Ordering<List<RexLiteral>> comparator(
       RelFieldCollation fieldCollation) {
     final int nullComparison = fieldCollation.nullDirection.nullComparison;
     final int x = fieldCollation.getFieldIndex();
     switch (fieldCollation.direction) {
     case ASCENDING:
       return new Ordering<List<RexLiteral>>() {
-        public int compare(List<RexLiteral> o1, List<RexLiteral> o2) {
+        @Override public int compare(List<RexLiteral> o1, List<RexLiteral> o2) {
           final Comparable c1 = o1.get(x).getValueAs(Comparable.class);
           final Comparable c2 = o2.get(x).getValueAs(Comparable.class);
           return RelFieldCollation.compare(c1, c2, nullComparison);
@@ -420,7 +425,7 @@ public class RelMdCollation
       };
     default:
       return new Ordering<List<RexLiteral>>() {
-        public int compare(List<RexLiteral> o1, List<RexLiteral> o2) {
+        @Override public int compare(List<RexLiteral> o1, List<RexLiteral> o2) {
           final Comparable c1 = o1.get(x).getValueAs(Comparable.class);
           final Comparable c2 = o2.get(x).getValueAs(Comparable.class);
           return RelFieldCollation.compare(c2, c1, -nullComparison);
@@ -454,8 +459,6 @@ public class RelMdCollation
         : "EnumerableMergeJoin unsupported for join type " + joinType;
 
     final ImmutableList<RelCollation> leftCollations = mq.collations(left);
-    assert RelCollations.contains(leftCollations, leftKeys)
-        : "cannot merge join: left input is not sorted on left keys";
     if (!joinType.projectsRight()) {
       return leftCollations;
     }
@@ -464,8 +467,6 @@ public class RelMdCollation
     builder.addAll(leftCollations);
 
     final ImmutableList<RelCollation> rightCollations = mq.collations(right);
-    assert RelCollations.contains(rightCollations, rightKeys)
-        : "cannot merge join: right input is not sorted on right keys";
     final int leftFieldCount = left.getRowType().getFieldCount();
     for (RelCollation collation : rightCollations) {
       builder.add(RelCollations.shift(collation, leftFieldCount));
@@ -506,12 +507,14 @@ public class RelMdCollation
     return mq.collations(left);
   }
 
+  @SuppressWarnings("unused")
   public static List<RelCollation> enumerableBatchNestedLoopJoin(RelMetadataQuery mq,
       RelNode left, RelNode right, JoinRelType joinType) {
     // The current implementation always preserve the sort order of the left input
     return mq.collations(left);
   }
 
+  @SuppressWarnings("unused")
   private static List<RelCollation> enumerableJoin0(RelMetadataQuery mq,
       RelNode left, RelNode right, JoinRelType joinType) {
     // The current implementation can preserve the sort order of the left input if one of the
@@ -519,6 +522,9 @@ public class RelMdCollation
     // (i) join type is INNER or LEFT;
     // (ii) RelCollation always orders nulls last.
     final ImmutableList<RelCollation> leftCollations = mq.collations(left);
+    if (leftCollations == null) {
+      return null;
+    }
     switch (joinType) {
     case SEMI:
     case ANTI:
@@ -530,12 +536,14 @@ public class RelMdCollation
       for (RelCollation collation : leftCollations) {
         for (RelFieldCollation field : collation.getFieldCollations()) {
           if (!(RelFieldCollation.NullDirection.LAST == field.nullDirection)) {
-            return ImmutableList.of();
+            return null;
           }
         }
       }
       return leftCollations;
+    default:
+      break;
     }
-    return ImmutableList.of();
+    return null;
   }
 }

@@ -100,12 +100,12 @@ public class Frameworks {
   public abstract static class PrepareAction<R>
       implements BasePrepareAction<R> {
     private final FrameworkConfig config;
-    public PrepareAction() {
+    protected PrepareAction() {
       this.config = newConfigBuilder()
           .defaultSchema(Frameworks.createRootSchema(true)).build();
     }
 
-    public PrepareAction(FrameworkConfig config) {
+    protected PrepareAction(FrameworkConfig config) {
       this.config = config;
     }
 
@@ -237,7 +237,7 @@ public class Frameworks {
       context = Contexts.empty();
       parserConfig = SqlParser.Config.DEFAULT;
       sqlValidatorConfig = SqlValidator.Config.DEFAULT;
-      sqlToRelConverterConfig = SqlToRelConverter.Config.DEFAULT;
+      sqlToRelConverterConfig = SqlToRelConverter.config();
       typeSystem = RelDataTypeSystem.DEFAULT;
       evolveLattice = false;
       statisticProvider = QuerySqlStatisticProvider.SILENT_CACHING_INSTANCE;
@@ -423,63 +423,63 @@ public class Frameworks {
       this.viewExpander = viewExpander;
     }
 
-    public SqlParser.Config getParserConfig() {
+    @Override public SqlParser.Config getParserConfig() {
       return parserConfig;
     }
 
-    public SqlValidator.Config getSqlValidatorConfig() {
+    @Override public SqlValidator.Config getSqlValidatorConfig() {
       return sqlValidatorConfig;
     }
 
-    public SqlToRelConverter.Config getSqlToRelConverterConfig() {
+    @Override public SqlToRelConverter.Config getSqlToRelConverterConfig() {
       return sqlToRelConverterConfig;
     }
 
-    public SchemaPlus getDefaultSchema() {
+    @Override public SchemaPlus getDefaultSchema() {
       return defaultSchema;
     }
 
-    public RexExecutor getExecutor() {
+    @Override public RexExecutor getExecutor() {
       return executor;
     }
 
-    public ImmutableList<Program> getPrograms() {
+    @Override public ImmutableList<Program> getPrograms() {
       return programs;
     }
 
-    public RelOptCostFactory getCostFactory() {
+    @Override public RelOptCostFactory getCostFactory() {
       return costFactory;
     }
 
-    public ImmutableList<RelTraitDef> getTraitDefs() {
+    @Override public ImmutableList<RelTraitDef> getTraitDefs() {
       return traitDefs;
     }
 
-    public SqlRexConvertletTable getConvertletTable() {
+    @Override public SqlRexConvertletTable getConvertletTable() {
       return convertletTable;
     }
 
-    public Context getContext() {
+    @Override public Context getContext() {
       return context;
     }
 
-    public SqlOperatorTable getOperatorTable() {
+    @Override public SqlOperatorTable getOperatorTable() {
       return operatorTable;
     }
 
-    public RelDataTypeSystem getTypeSystem() {
+    @Override public RelDataTypeSystem getTypeSystem() {
       return typeSystem;
     }
 
-    public boolean isEvolveLattice() {
+    @Override public boolean isEvolveLattice() {
       return evolveLattice;
     }
 
-    public SqlStatisticProvider getStatisticProvider() {
+    @Override public SqlStatisticProvider getStatisticProvider() {
       return statisticProvider;
     }
 
-    public RelOptTable.ViewExpander getViewExpander() {
+    @Override public RelOptTable.ViewExpander getViewExpander() {
       return viewExpander;
     }
   }

@@ -30,6 +30,7 @@ import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.util.DateString;
 import org.apache.calcite.util.TimeString;
@@ -86,10 +87,12 @@ public class GeodeFilter extends Filter implements GeodeRel {
    * Translates {@link RexNode} expressions into Geode expression strings.
    */
   static class Translator {
+    @SuppressWarnings("unused")
     private final RelDataType rowType;
 
     private final List<String> fieldNames;
 
+    @SuppressWarnings("unused")
     private RexBuilder rexBuilder;
 
     Translator(RelDataType rowType, RexBuilder rexBuilder) {
@@ -131,8 +134,14 @@ public class GeodeFilter extends Filter implements GeodeRel {
      * @return OQL predicate string
      */
     private String translateMatch(RexNode condition) {
+      // Remove SEARCH calls because current translation logic cannot handle it.
+      // However, it would efficient to handle SEARCH explicitly; a Geode
+      // 'IN SET' would always manifest as a SEARCH.
+      final RexNode condition2 =
+          RexUtil.expandSearch(rexBuilder, null, condition);
+
       // Returns condition decomposed by OR
-      List<RexNode> disjunctions = RelOptUtil.disjunctions(condition);
+      List<RexNode> disjunctions = RelOptUtil.disjunctions(condition2);
       if (disjunctions.size() == 1) {
         return translateAnd(disjunctions.get(0));
       } else {
@@ -155,9 +164,8 @@ public class GeodeFilter extends Filter implements GeodeRel {
       return Util.toString(predicates, "", " AND ", "");
     }
 
-    /**
-     *  Get the field name for the left node to use for IN SET query
-     */
+    /** Returns the field name for the left node to use for {@code IN SET}
+     * query. */
     private String getLeftNodeFieldName(RexNode left) {
       switch (left.getKind()) {
       case INPUT_REF:
@@ -174,9 +182,8 @@ public class GeodeFilter extends Filter implements GeodeRel {
       }
     }
 
-    /**
-     *  Check if we can use IN SET Query clause to improve query performance
-     */
+    /** Returns whether we can use the {@code IN SET} query clause to
+     * improve query performance. */
     private boolean useInSetQueryClause(List<RexNode> disjunctions) {
       // Only use the in set for more than one disjunctions
       if (disjunctions.size() <= 1) {
@@ -207,9 +214,7 @@ public class GeodeFilter extends Filter implements GeodeRel {
       });
     }
 
-    /**
-     * Creates OQL IN SET predicate string
-     */
+    /** Creates OQL {@code IN SET} predicate string. */
     private String translateInSet(List<RexNode> disjunctions) {
       Preconditions.checkArgument(
           !disjunctions.isEmpty(), "empty disjunctions");

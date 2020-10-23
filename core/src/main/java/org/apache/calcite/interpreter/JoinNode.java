@@ -49,7 +49,7 @@ public class JoinNode implements Node {
 
   }
 
-  public void run() throws InterruptedException {
+  @Override public void run() throws InterruptedException {
 
     final int fieldCount = rel.getLeft().getRowType().getFieldCount()
         + rel.getRight().getRowType().getFieldCount();
@@ -132,6 +132,8 @@ public class JoinNode implements Node {
       case SEMI:
         sink.send(Row.asCopy(outerRow.getValues()));
         break;
+      default:
+        break;
       }
     } else {
       switch (joinRelType) {
@@ -150,6 +152,8 @@ public class JoinNode implements Node {
         break;
       case ANTI:
         sink.send(Row.asCopy(outerRow.getValues()));
+        break;
+      default:
         break;
       }
     }

@@ -33,6 +33,7 @@ import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexChecker;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexOver;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.SqlExplainLevel;
@@ -44,10 +45,12 @@ import org.apache.calcite.util.mapping.MappingType;
 import org.apache.calcite.util.mapping.Mappings;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
+
+import org.apiguardian.api.API;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -150,11 +153,7 @@ public abstract class Project extends SingleRel implements Hintable {
     return true;
   }
 
-  @Override public List<RexNode> getChildExps() {
-    return exps;
-  }
-
-  public RelNode accept(RexShuttle shuttle) {
+  @Override public RelNode accept(RexShuttle shuttle) {
     List<RexNode> exps = shuttle.apply(this.exps);
     if (this.exps == exps) {
       return this;
@@ -196,7 +195,12 @@ public abstract class Project extends SingleRel implements Hintable {
     return 1;
   }
 
-  public boolean isValid(Litmus litmus, Context context) {
+  /** Returns whether this Project contains any windowed-aggregate functions. */
+  public final boolean containsOver() {
+    return RexOver.containsOver(getProjects(), null);
+  }
+
+  @Override public boolean isValid(Litmus litmus, Context context) {
     if (!super.isValid(litmus, context)) {
       return litmus.fail(null);
     }
@@ -217,7 +221,7 @@ public abstract class Project extends SingleRel implements Hintable {
       return litmus.fail("field names not distinct: {}", rowType);
     }
     //CHECKSTYLE: IGNORE 1
-    if (false && !Util.isDistinct(Lists.transform(exps, RexNode::toString))) {
+    if (false && !Util.isDistinct(Util.transform(exps, RexNode::toString))) {
       // Projecting the same expression twice is usually a bad idea,
       // because it may create expressions downstream which are equivalent
       // but which look different. We can't ban duplicate projects,
@@ -255,7 +259,7 @@ public abstract class Project extends SingleRel implements Hintable {
     return refs.size();
   }
 
-  public RelWriter explainTerms(RelWriter pw) {
+  @Override public RelWriter explainTerms(RelWriter pw) {
     super.explainTerms(pw);
     // Skip writing field names so the optimizer can reuse the projects that differ in
     // field names only
@@ -286,6 +290,27 @@ public abstract class Project extends SingleRel implements Hintable {
     }
 
     return pw;
+  }
+
+  @API(since = "1.24", status = API.Status.INTERNAL)
+  protected boolean deepEquals0(Object obj) {
+    if (this == obj) {
+      return true;
+    }
+    if (obj == null || getClass() != obj.getClass()) {
+      return false;
+    }
+    Project o = (Project) obj;
+    return traitSet.equals(o.traitSet)
+        && input.deepEquals(o.input)
+        && exps.equals(o.exps)
+        && hints.equals(o.hints)
+        && getRowType().equalsSansFieldNames(o.getRowType());
+  }
+
+  @API(since = "1.24", status = API.Status.INTERNAL)
+  protected int deepHashCode0() {
+    return Objects.hash(traitSet, input.deepHashCode(), exps, hints);
   }
 
   /**

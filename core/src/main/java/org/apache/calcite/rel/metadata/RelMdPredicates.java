@@ -132,7 +132,7 @@ public class RelMdPredicates
 
   private static final List<RexNode> EMPTY_LIST = ImmutableList.of();
 
-  public MetadataDef<BuiltInMetadata.Predicates> getDef() {
+  @Override public MetadataDef<BuiltInMetadata.Predicates> getDef() {
     return BuiltInMetadata.Predicates.DEF;
   }
 
@@ -485,7 +485,12 @@ public class RelMdPredicates
     return mq.getPulledUpPredicates(input);
   }
 
-  /** @see RelMetadataQuery#getPulledUpPredicates(RelNode) */
+  // CHECKSTYLE: IGNORE 1
+  /**
+   * Returns the
+   * {@link BuiltInMetadata.Predicates#getPredicates()}
+   * statistic.
+   * @see RelMetadataQuery#getPulledUpPredicates(RelNode) */
   public RelOptPredicateList getPredicates(RelSubset r,
       RelMetadataQuery mq) {
     if (!Bug.CALCITE_1048_FIXED) {
@@ -533,6 +538,7 @@ public class RelMdPredicates
     final ImmutableBitSet leftFieldsBitSet;
     final ImmutableBitSet rightFieldsBitSet;
     final ImmutableBitSet allFieldsBitSet;
+    @SuppressWarnings("JdkObsolete")
     SortedMap<Integer, BitSet> equivalence;
     final Map<RexNode, ImmutableBitSet> exprFields;
     final Set<RexNode> allExprs;
@@ -541,6 +547,7 @@ public class RelMdPredicates
     final RexNode rightChildPredicates;
     final RexSimplify simplify;
 
+    @SuppressWarnings("JdkObsolete")
     JoinConditionBasedPredicateInference(Join joinRel, RexNode leftPredicates,
         RexNode rightPredicates, RexSimplify simplify) {
       super();
@@ -636,6 +643,8 @@ public class RelMdPredicates
             joinType == JoinRelType.LEFT ? rightFieldsBitSet
                 : allFieldsBitSet);
         break;
+      default:
+        break;
       }
       switch (joinType) {
       case SEMI:
@@ -645,6 +654,8 @@ public class RelMdPredicates
             includeEqualityInference,
             joinType == JoinRelType.RIGHT ? leftFieldsBitSet
                 : allFieldsBitSet);
+        break;
+      default:
         break;
       }
 
@@ -750,6 +761,7 @@ public class RelMdPredicates
           && !isAlwaysTrue(tr);
     }
 
+    @SuppressWarnings("JdkObsolete")
     private void markAsEquivalent(int p1, int p2) {
       BitSet b = equivalence.get(p1);
       b.set(p2);
@@ -825,6 +837,7 @@ public class RelMdPredicates
       Mapping nextMapping;
       boolean firstCall;
 
+      @SuppressWarnings("JdkObsolete")
       ExprsItr(ImmutableBitSet fields) {
         nextMapping = null;
         columns = new int[fields.cardinality()];
@@ -839,7 +852,7 @@ public class RelMdPredicates
         firstCall = true;
       }
 
-      public boolean hasNext() {
+      @Override public boolean hasNext() {
         if (firstCall) {
           initializeMapping();
           firstCall = false;
@@ -849,11 +862,11 @@ public class RelMdPredicates
         return nextMapping != null;
       }
 
-      public Mapping next() {
+      @Override public Mapping next() {
         return nextMapping;
       }
 
-      public void remove() {
+      @Override public void remove() {
         throw new UnsupportedOperationException();
       }
 

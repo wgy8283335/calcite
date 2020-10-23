@@ -268,10 +268,11 @@ class CalciteRemoteDriverTest {
         .returns(CalciteAssert.checkResultContains("COLUMN_NAME=EMPNO"));
   }
 
-  @Test void testRemoteTypeInfo() throws Exception {
+  @Test void testRemoteTypeInfo() {
+    // TypeInfo does not include internal types (NULL, SYMBOL, ANY, etc.)
     CalciteAssert.hr().with(REMOTE_CONNECTION_FACTORY)
         .metaData(GET_TYPEINFO)
-        .returns(CalciteAssert.checkResultCount(is(45)));
+        .returns(CalciteAssert.checkResultCount(is(41)));
   }
 
   @Test void testRemoteTableTypes() throws Exception {
@@ -859,7 +860,7 @@ class CalciteRemoteDriverTest {
   }
 
   /**
-   * Remote PreparedStatement insert WITHOUT bind variables
+   * Remote PreparedStatement insert WITHOUT bind variables.
    */
   @Test void testRemotePreparedStatementInsert() throws Exception {
     final Connection connection = DriverManager.getConnection(
@@ -880,7 +881,7 @@ class CalciteRemoteDriverTest {
   }
 
   /**
-   * Remote PreparedStatement insert WITH bind variables
+   * Remote PreparedStatement insert WITH bind variables.
    */
   @Test void testRemotePreparedStatementInsert2() throws Exception {
   }

@@ -21,6 +21,7 @@ import org.apache.calcite.linq4j.function.Functions;
 import org.apache.calcite.plan.AbstractRelOptPlanner;
 import org.apache.calcite.plan.CommonRelSubExprRule;
 import org.apache.calcite.plan.Context;
+import org.apache.calcite.plan.RelDigest;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptCostFactory;
 import org.apache.calcite.plan.RelOptCostImpl;
@@ -52,6 +53,7 @@ import org.apache.calcite.util.graph.TopologicalOrderIterator;
 
 import com.google.common.collect.ImmutableList;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -59,7 +61,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -84,7 +85,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
    * {@link RelDataType} is represented with its field types as {@code List<RelDataType>}.
    * This enables to treat as equal projects that differ in expression names only.
    */
-  private final Map<Pair<String, List<RelDataType>>, HepRelVertex> mapDigestToVertex =
+  private final Map<RelDigest, HepRelVertex> mapDigestToVertex =
       new HashMap<>();
 
   private int nTransformations;
@@ -153,13 +154,13 @@ public class HepPlanner extends AbstractRelOptPlanner {
   //~ Methods ----------------------------------------------------------------
 
   // implement RelOptPlanner
-  public void setRoot(RelNode rel) {
+  @Override public void setRoot(RelNode rel) {
     root = addRelToGraph(rel);
     dumpGraph();
   }
 
   // implement RelOptPlanner
-  public RelNode getRoot() {
+  @Override public RelNode getRoot() {
     return root;
   }
 
@@ -172,7 +173,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
   }
 
   // implement RelOptPlanner
-  public RelNode changeTraits(RelNode rel, RelTraitSet toTraits) {
+  @Override public RelNode changeTraits(RelNode rel, RelTraitSet toTraits) {
     // Ignore traits, except for the root, where we remember
     // what the final conversion should be.
     if ((rel == root) || (rel == root.getCurrentRel())) {
@@ -182,7 +183,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
   }
 
   // implement RelOptPlanner
-  public RelNode findBestExp() {
+  @Override public RelNode findBestExp() {
     assert root != null;
 
     executeProgram(mainProgram);
@@ -299,7 +300,8 @@ public class HepPlanner extends AbstractRelOptPlanner {
         if (!instruction.guaranteed) {
           // Add a TraitMatchingRule to work bottom-up
           instruction.ruleSet.add(
-              new TraitMatchingRule(converter, RelFactories.LOGICAL_BUILDER));
+              TraitMatchingRule.config(converter, RelFactories.LOGICAL_BUILDER)
+                  .toRule());
         }
       }
     }
@@ -759,7 +761,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
   }
 
   // implement RelOptPlanner
-  public RelNode register(
+  @Override public RelNode register(
       RelNode rel,
       RelNode equivRel) {
     // Ignore; this call is mostly to tell Volcano how to avoid
@@ -772,12 +774,12 @@ public class HepPlanner extends AbstractRelOptPlanner {
   }
 
   // implement RelOptPlanner
-  public RelNode ensureRegistered(RelNode rel, RelNode equivRel) {
+  @Override public RelNode ensureRegistered(RelNode rel, RelNode equivRel) {
     return rel;
   }
 
   // implement RelOptPlanner
-  public boolean isRegistered(RelNode rel) {
+  @Override public boolean isRegistered(RelNode rel) {
     return true;
   }
 
@@ -810,8 +812,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
     // try to find equivalent rel only if DAG is allowed
     if (!noDag) {
       // Now, check if an equivalent vertex already exists in graph.
-      Pair<String, List<RelDataType>> key = key(rel);
-      HepRelVertex equivVertex = mapDigestToVertex.get(key);
+      HepRelVertex equivVertex = mapDigestToVertex.get(rel.getRelDigest());
       if (equivVertex != null) {
         // Use existing vertex.
         return equivVertex;
@@ -880,7 +881,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
       return;
     }
     Queue<DefaultEdge> queue =
-        new LinkedList<>(graph.getInwardEdges(vertex));
+        new ArrayDeque<>(graph.getInwardEdges(vertex));
     while (!queue.isEmpty()) {
       DefaultEdge edge = queue.remove();
       HepRelVertex source = (HepRelVertex) edge.source;
@@ -900,7 +901,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
       // reachable from here.
       notifyDiscard(vertex.getCurrentRel());
     }
-    Pair<String, List<RelDataType>> oldKey = key(vertex.getCurrentRel());
+    RelDigest oldKey = vertex.getCurrentRel().getRelDigest();
     if (mapDigestToVertex.get(oldKey) == vertex) {
       mapDigestToVertex.remove(oldKey);
     }
@@ -911,8 +912,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
     // otherwise the digest will be removed wrongly in the mapDigestToVertex
     //  when collectGC
     // so it must update the digest that map to vertex
-    Pair<String, List<RelDataType>> newKey = key(rel);
-    mapDigestToVertex.put(newKey, vertex);
+    mapDigestToVertex.put(rel.getRelDigest(), vertex);
     if (rel != vertex.getCurrentRel()) {
       vertex.replaceRel(rel);
     }
@@ -978,7 +978,7 @@ public class HepPlanner extends AbstractRelOptPlanner {
     graphSizeLastGC = graph.vertexSet().size();
 
     // Clean up digest map too.
-    Iterator<Map.Entry<Pair<String, List<RelDataType>>, HepRelVertex>> digestIter =
+    Iterator<Map.Entry<RelDigest, HepRelVertex>> digestIter =
         mapDigestToVertex.entrySet().iterator();
     while (digestIter.hasNext()) {
       HepRelVertex vertex = digestIter.next().getValue();
@@ -1028,12 +1028,12 @@ public class HepPlanner extends AbstractRelOptPlanner {
   }
 
   // implement RelOptPlanner
-  public void registerMetadataProviders(List<RelMetadataProvider> list) {
+  @Override public void registerMetadataProviders(List<RelMetadataProvider> list) {
     list.add(0, new HepRelMetadataProvider());
   }
 
   // implement RelOptPlanner
-  public long getRelMetadataTimestamp(RelNode rel) {
+  @Override public long getRelMetadataTimestamp(RelNode rel) {
     // TODO jvs 20-Apr-2006: This is overly conservative.  Better would be
     // to keep a timestamp per HepRelVertex, and update only affected
     // vertices and all ancestors on each transformation.

@@ -33,6 +33,7 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexLocalRef;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexOver;
 import org.apache.calcite.rex.RexProgram;
 import org.apache.calcite.rex.RexProgramBuilder;
 import org.apache.calcite.rex.RexShuttle;
@@ -130,7 +131,12 @@ public abstract class Calc extends SingleRel implements Hintable {
     return copy(traitSet, child, program);
   }
 
-  public boolean isValid(Litmus litmus, Context context) {
+  /** Returns whether this Calc contains any windowed-aggregate functions. */
+  public final boolean containsOver() {
+    return RexOver.containsOver(program);
+  }
+
+  @Override public boolean isValid(Litmus litmus, Context context) {
     if (!RelOptUtil.equal(
         "program's input type",
         program.getInputRowType(),
@@ -168,11 +174,11 @@ public abstract class Calc extends SingleRel implements Hintable {
     return planner.getCostFactory().makeCost(dRows, dCpu, dIo);
   }
 
-  public RelWriter explainTerms(RelWriter pw) {
+  @Override public RelWriter explainTerms(RelWriter pw) {
     return program.explainCalc(super.explainTerms(pw));
   }
 
-  public RelNode accept(RexShuttle shuttle) {
+  @Override public RelNode accept(RexShuttle shuttle) {
     List<RexNode> oldExprs = program.getExprList();
     List<RexNode> exprs = shuttle.apply(oldExprs);
     List<RexLocalRef> oldProjects = program.getProjectList();

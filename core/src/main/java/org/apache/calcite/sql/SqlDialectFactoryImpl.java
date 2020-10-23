@@ -43,15 +43,13 @@ import org.apache.calcite.sql.dialect.OracleSqlDialect;
 import org.apache.calcite.sql.dialect.ParaccelSqlDialect;
 import org.apache.calcite.sql.dialect.PhoenixSqlDialect;
 import org.apache.calcite.sql.dialect.PostgresqlSqlDialect;
+import org.apache.calcite.sql.dialect.PrestoSqlDialect;
 import org.apache.calcite.sql.dialect.RedshiftSqlDialect;
 import org.apache.calcite.sql.dialect.SnowflakeSqlDialect;
 import org.apache.calcite.sql.dialect.SparkSqlDialect;
 import org.apache.calcite.sql.dialect.SybaseSqlDialect;
 import org.apache.calcite.sql.dialect.TeradataSqlDialect;
 import org.apache.calcite.sql.dialect.VerticaSqlDialect;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
@@ -61,14 +59,12 @@ import java.util.Locale;
  * The default implementation of a <code>SqlDialectFactory</code>.
  */
 public class SqlDialectFactoryImpl implements SqlDialectFactory {
-  private static final Logger LOGGER = LoggerFactory.getLogger(SqlDialectFactoryImpl.class);
-
   public static final SqlDialectFactoryImpl INSTANCE = new SqlDialectFactoryImpl();
 
   private final JethroDataSqlDialect.JethroInfoCache jethroCache =
       JethroDataSqlDialect.createCache();
 
-  public SqlDialect create(DatabaseMetaData databaseMetaData) {
+  @Override public SqlDialect create(DatabaseMetaData databaseMetaData) {
     String databaseProductName;
     int databaseMajorVersion;
     int databaseMinorVersion;
@@ -133,6 +129,8 @@ public class SqlDialectFactoryImpl implements SqlDialectFactory {
       return new SnowflakeSqlDialect(c);
     case "SPARK":
       return new SparkSqlDialect(c);
+    default:
+      break;
     }
     // Now the fuzzy matches.
     if (databaseProductName.startsWith("DB2")) {
@@ -289,6 +287,8 @@ public class SqlDialectFactoryImpl implements SqlDialectFactory {
       return PhoenixSqlDialect.DEFAULT;
     case POSTGRESQL:
       return PostgresqlSqlDialect.DEFAULT;
+    case PRESTO:
+      return PrestoSqlDialect.DEFAULT;
     case REDSHIFT:
       return RedshiftSqlDialect.DEFAULT;
     case SYBASE:

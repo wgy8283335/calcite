@@ -18,6 +18,7 @@ package org.apache.calcite.sql.dialect;
 
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.TimeUnit;
+import org.apache.calcite.config.Lex;
 import org.apache.calcite.config.NullCollation;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeSystem;
@@ -37,6 +38,7 @@ import org.apache.calcite.sql.SqlSetOperator;
 import org.apache.calcite.sql.SqlSyntax;
 import org.apache.calcite.sql.SqlWriter;
 import org.apache.calcite.sql.fun.SqlTrimFunction;
+import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.BasicSqlType;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -48,6 +50,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
+import javax.annotation.Nonnull;
 
 /**
  * A <code>SqlDialect</code> implementation for Google BigQuery's "Standard SQL"
@@ -114,9 +117,23 @@ public class BigQuerySqlDialect extends SqlDialect {
     return false;
   }
 
+  @Override public boolean supportsAggregateFunctionFilter() {
+    return false;
+  }
+
+  @Override public @Nonnull SqlParser.Config configureParser(
+      SqlParser.Config configBuilder) {
+    return super.configureParser(configBuilder)
+        .withCharLiteralStyles(Lex.BIG_QUERY.charLiteralStyles);
+  }
+
   @Override public void unparseOffsetFetch(SqlWriter writer, SqlNode offset,
       SqlNode fetch) {
     unparseFetchUsingLimit(writer, offset, fetch);
+  }
+
+  @Override public boolean supportsAliasedValues() {
+    return false;
   }
 
   @Override public void unparseCall(final SqlWriter writer, final SqlCall call, final int leftPrec,
@@ -164,10 +181,10 @@ public class BigQuerySqlDialect extends SqlDialect {
   }
 
   /** BigQuery interval syntax: INTERVAL int64 time_unit. */
-  @Override public void unparseSqlIntervalLiteral(
-          SqlWriter writer, SqlIntervalLiteral literal, int leftPrec, int rightPrec) {
+  @Override public void unparseSqlIntervalLiteral(SqlWriter writer,
+      SqlIntervalLiteral literal, int leftPrec, int rightPrec) {
     SqlIntervalLiteral.IntervalValue interval =
-            (SqlIntervalLiteral.IntervalValue) literal.getValue();
+        literal.getValueAs(SqlIntervalLiteral.IntervalValue.class);
     writer.keyword("INTERVAL");
     if (interval.getSign() == -1) {
       writer.print("-");
@@ -246,9 +263,11 @@ public class BigQuerySqlDialect extends SqlDialect {
     }
   }
 
-  /** BigQuery data type reference:
+  /** {@inheritDoc}
+   *
+   * <p>BigQuery data type reference:
    * <a href="https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types">
-   * BigQuery Standard SQL Data Types</a>
+   * BigQuery Standard SQL Data Types</a>.
    */
   @Override public SqlNode getCastSpec(final RelDataType type) {
     if (type instanceof BasicSqlType) {
@@ -280,6 +299,8 @@ public class BigQuerySqlDialect extends SqlDialect {
         return createSqlDataTypeSpecByName("TIME", typeName);
       case TIMESTAMP:
         return createSqlDataTypeSpecByName("TIMESTAMP", typeName);
+      default:
+        break;
       }
     }
     return super.getCastSpec(type);

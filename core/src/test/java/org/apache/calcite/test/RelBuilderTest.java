@@ -31,6 +31,7 @@ import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Exchange;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.core.Project;
+import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.core.TableFunctionScan;
 import org.apache.calcite.rel.core.TableModify;
 import org.apache.calcite.rel.core.Window;
@@ -544,9 +545,65 @@ public class RelBuilderTest {
         .filter(condition, condition2, condition, condition)
         .build();
     final String expected2 = ""
-        + "LogicalFilter(condition=[AND(>($7, 20), <($7, 30))])\n"
+        + "LogicalFilter(condition=[SEARCH($7, Sarg[(20..30)])])\n"
         + "  LogicalTableScan(table=[[scott, EMP]])\n";
     assertThat(root2, hasTree(expected2));
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-4325">[CALCITE-4325]
+   * RexSimplify incorrectly simplifies complex expressions with Sarg and
+   * NULL</a>. */
+  @Test void testFilterAndOrWithNull() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   WHERE (deptno <> 20 OR deptno IS NULL) AND deptno = 10
+    // Should be simplified to:
+    //   SELECT *
+    //   FROM emp
+    //   WHERE deptno = 10
+    // With [CALCITE-4325], is incorrectly simplified to:
+    //   SELECT *
+    //   FROM emp
+    //   WHERE deptno = 10 OR deptno IS NULL
+    final Function<RelBuilder, RelNode> f = b ->
+        b.scan("EMP")
+            .filter(
+                b.and(
+                    b.or(
+                        b.notEquals(b.field("DEPTNO"), b.literal(20)),
+                        b.isNull(b.field("DEPTNO"))),
+                    b.equals(b.field("DEPTNO"), b.literal(10))))
+            .build();
+
+    final String expected = "LogicalFilter(condition=[=($7, 10)])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+  }
+
+  @Test void testFilterAndOrWithNull2() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   WHERE (deptno = 20 OR deptno IS NULL) AND deptno = 10
+    // Should be simplified to:
+    //   No rows (WHERE FALSE)
+    // With [CALCITE-4325], is incorrectly simplified to:
+    //   SELECT *
+    //   FROM emp
+    //   WHERE deptno IS NULL
+    final Function<RelBuilder, RelNode> f = b ->
+        b.scan("EMP")
+            .filter(
+                b.and(
+                    b.or(b.equals(b.field("DEPTNO"), b.literal(20)),
+                        b.isNull(b.field("DEPTNO"))),
+                    b.equals(b.field("DEPTNO"), b.literal(10))))
+            .build();
+
+    final String expected = "LogicalValues(tuples=[[]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
   }
 
   @Test void testBadFieldName() {
@@ -636,10 +693,10 @@ public class RelBuilderTest {
                 builder.alias(builder.field(6), "C"))
             .build();
     final String expected = ""
-        + "LogicalProject(DEPTNO=[$7], COMM=[CAST($6):SMALLINT NOT NULL],"
-        + " $f2=[OR(=($7, 20), AND(null:NULL, =($7, 10), IS NULL($6),"
-        + " IS NULL($7)), =($7, 30))], n2=[IS NULL($2)],"
-        + " nn2=[IS NOT NULL($3)], $f5=[20], COMM0=[$6], C=[$6])\n"
+        + "LogicalProject(DEPTNO=[$7], COMM=[CAST($6):SMALLINT NOT NULL], "
+        + "$f2=[OR(SEARCH($7, Sarg[20, 30]), AND(null:NULL, =($7, 10), "
+        + "IS NULL($6), IS NULL($7)))], n2=[IS NULL($2)], "
+        + "nn2=[IS NOT NULL($3)], $f5=[20], COMM0=[$6], C=[$6])\n"
         + "  LogicalTableScan(table=[[scott, EMP]])\n";
     assertThat(root, hasTree(expected));
   }
@@ -1566,6 +1623,44 @@ public class RelBuilderTest {
     } catch (IllegalArgumentException e) {
       assertThat(e.getMessage(), is("FILTER not allowed"));
     }
+  }
+
+  @Test void testAggregateOneRow() {
+    final Function<RelBuilder, RelNode> f = builder ->
+        builder.values(new String[] {"a", "b"}, 1, 2)
+            .aggregate(builder.groupKey(1))
+            .build();
+    final String plan = "LogicalProject(b=[$1])\n"
+        + "  LogicalValues(tuples=[[{ 1, 2 }]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(plan));
+
+    final String plan2 = "LogicalAggregate(group=[{1}])\n"
+        + "  LogicalValues(tuples=[[{ 1, 2 }]])\n";
+    assertThat(f.apply(createBuilder(c -> c.withAggregateUnique(true))),
+        hasTree(plan2));
+  }
+
+  /** Tests that we do not convert an Aggregate to a Project if there are
+   * multiple group sets. */
+  @Test void testAggregateGroupingSetsOneRow() {
+    final Function<RelBuilder, RelNode> f = builder -> {
+      final List<Integer> list01 = Arrays.asList(0, 1);
+      final List<Integer> list0 = Collections.singletonList(0);
+      final List<Integer> list1 = Collections.singletonList(1);
+      return builder.values(new String[] {"a", "b"}, 1, 2)
+          .aggregate(
+              builder.groupKey(builder.fields(list01),
+                  ImmutableList.of(builder.fields(list0),
+                      builder.fields(list1),
+                      builder.fields(list01))))
+          .build();
+    };
+    final String plan = ""
+        + "LogicalAggregate(group=[{0, 1}], groups=[[{0, 1}, {0}, {1}]])\n"
+        + "  LogicalValues(tuples=[[{ 1, 2 }]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(plan));
+    assertThat(f.apply(createBuilder(c -> c.withAggregateUnique(true))),
+        hasTree(plan));
   }
 
   @Test void testDistinct() {
@@ -2793,6 +2888,7 @@ public class RelBuilderTest {
         "LogicalSort(sort0=[$2], sort1=[$0], dir0=[ASC], dir1=[DESC])\n"
             + "  LogicalTableScan(table=[[scott, EMP]])\n";
     assertThat(root, hasTree(expected));
+    assertThat(((Sort) root).getSortExps().toString(), is("[$2, $0]"));
 
     // same result using ordinals
     final RelNode root2 =
@@ -2898,13 +2994,19 @@ public class RelBuilderTest {
     //   SELECT *
     //   FROM emp
     //   ORDER BY deptno DESC FETCH 0
-    final RelBuilder builder = RelBuilder.create(config().build());
-    final RelNode root =
-        builder.scan("EMP")
-            .sortLimit(-1, 0, builder.desc(builder.field("DEPTNO")))
+    final Function<RelBuilder, RelNode> f = b ->
+        b.scan("EMP")
+            .sortLimit(-1, 0, b.desc(b.field("DEPTNO")))
             .build();
     final String expected = "LogicalValues(tuples=[[]])\n";
-    assertThat(root, hasTree(expected));
+    final String expectedNoSimplify = ""
+        + "LogicalSort(sort0=[$7], dir0=[DESC], fetch=[0])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+    assertThat(f.apply(createBuilder(c -> c.withSimplifyLimit(true))),
+        hasTree(expected));
+    assertThat(f.apply(createBuilder(c -> c.withSimplifyLimit(false))),
+        hasTree(expectedNoSimplify));
   }
 
   /** Test case for
@@ -3054,6 +3156,49 @@ public class RelBuilderTest {
     }
   }
 
+  @Test void testPivot() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM (SELECT mgr, deptno, job, sal FROM emp)
+    //   PIVOT (SUM(sal) AS ss, COUNT(*) AS c
+    //       FOR (job, deptno)
+    //       IN (('CLERK', 10) AS c10, ('MANAGER', 20) AS m20))
+    //
+    // translates to
+    //   SELECT mgr,
+    //     SUM(sal) FILTER (WHERE job = 'CLERK' AND deptno = 10) AS c10_ss,
+    //     COUNT(*) FILTER (WHERE job = 'CLERK' AND deptno = 10) AS c10_c,
+    //     SUM(sal) FILTER (WHERE job = 'MANAGER' AND deptno = 20) AS m20_ss,
+    //     COUNT(*) FILTER (WHERE job = 'MANAGER' AND deptno = 20) AS m20_c
+    //   FROM emp
+    //   GROUP BY mgr
+    //
+    final Function<RelBuilder, RelNode> f = b ->
+        b.scan("EMP")
+            .pivot(b.groupKey("MGR"),
+                Arrays.asList(
+                    b.sum(b.field("SAL")).as("SS"),
+                    b.count().as("C")),
+                b.fields(Arrays.asList("JOB", "DEPTNO")),
+                ImmutableMap.<String, List<RexNode>>builder()
+                    .put("C10",
+                        Arrays.asList(b.literal("CLERK"), b.literal(10)))
+                    .put("M20",
+                        Arrays.asList(b.literal("MANAGER"), b.literal(20)))
+                    .build()
+                    .entrySet())
+            .build();
+    final String expected = ""
+        + "LogicalAggregate(group=[{0}], C10_SS=[SUM($1) FILTER $2], "
+        + "C10_C=[COUNT() FILTER $2], M20_SS=[SUM($1) FILTER $3], "
+        + "M20_C=[COUNT() FILTER $3])\n"
+        + "  LogicalProject(MGR=[$3], SAL=[$5], "
+        + "$f8=[IS TRUE(AND(=($2, 'CLERK'), =($7, 10)))], "
+        + "$f9=[IS TRUE(AND(=($2, 'MANAGER'), =($7, 20)))])\n"
+        + "    LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+  }
+
   @Test void testMatchRecognize() {
     // Equivalent SQL:
     //   SELECT *
@@ -3175,7 +3320,43 @@ public class RelBuilderTest {
     assertThat(root, hasTree(expected));
   }
 
-  /** Tests filter builder with correlation variables */
+  /** Tests {@link RelBuilder#in} with duplicate values. */
+  @Test void testFilterIn() {
+    final Function<RelBuilder, RelNode> f = b ->
+        b.scan("EMP")
+            .filter(
+                b.in(b.field("DEPTNO"), b.literal(10), b.literal(20),
+                    b.literal(10)))
+            .build();
+    final String expected = ""
+        + "LogicalFilter(condition=[SEARCH($7, Sarg[10, 20])])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+    assertThat(f.apply(createBuilder(c -> c.withSimplify(false))),
+        hasTree(expected));
+  }
+
+  @Test void testFilterOrIn() {
+    final Function<RelBuilder, RelNode> f = b ->
+        b.scan("EMP")
+            .filter(
+                b.or(
+                    b.call(SqlStdOperatorTable.GREATER_THAN, b.field("DEPTNO"),
+                        b.literal(15)),
+                    b.in(b.field("JOB"), b.literal("CLERK")),
+                    b.in(b.field("DEPTNO"), b.literal(10), b.literal(20),
+                        b.literal(11), b.literal(10))))
+            .build();
+    final String expected = ""
+        + "LogicalFilter(condition=[OR(SEARCH($7, Sarg[10, 11, (15..+∞)]), "
+        + "SEARCH($2, Sarg['CLERK']:CHAR(5)))])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+    assertThat(f.apply(createBuilder(c -> c.withSimplify(false))),
+        hasTree(expected));
+  }
+
+  /** Tests filter builder with correlation variables. */
   @Test void testFilterWithCorrelationVariables() {
     final RelBuilder builder = RelBuilder.create(config().build());
     final Holder<RexCorrelVariable> v = Holder.of(null);
@@ -3199,10 +3380,12 @@ public class RelBuilderTest {
         .build();
 
     final String expected = ""
-        + "LogicalCorrelate(correlation=[$cor0], joinType=[left], requiredColumns=[{7}])\n"
+        + "LogicalCorrelate(correlation=[$cor0], joinType=[left], "
+        + "requiredColumns=[{7}])\n"
         + "  LogicalTableScan(table=[[scott, EMP]])\n"
         + "  LogicalFilter(condition=[=($cor0.SAL, 1000)])\n"
-        + "    LogicalFilter(condition=[OR(AND(<($cor0.DEPTNO, 30), >($cor0.DEPTNO, 20)), "
+        + "    LogicalFilter(condition=[OR("
+        + "SEARCH($cor0.DEPTNO, Sarg[(20..30)]), "
         + "IS NULL($2))], variablesSet=[[$cor0]])\n"
         + "      LogicalTableScan(table=[[scott, DEPT]])\n";
 
@@ -3223,7 +3406,9 @@ public class RelBuilderTest {
     assertThat(root, hasTree("LogicalTableScan(table=[[scott, EMP]])\n"));
   }
 
-  /** Checks if simplification is run in {@link org.apache.calcite.rex.RexUnknownAs#FALSE} mode for filter conditions */
+  /** Checks if simplification is run in
+   * {@link org.apache.calcite.rex.RexUnknownAs#FALSE} mode for filter
+   * conditions. */
   @Test void testFilterSimplification() {
     final RelBuilder builder = RelBuilder.create(config().build());
     final RelNode root =
@@ -3535,16 +3720,63 @@ public class RelBuilderTest {
 
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-3747">[CALCITE-3747]
-   * Constructing BETWEEN with RelBuilder throws class cast exception</a>. */
+   * Constructing BETWEEN with RelBuilder throws class cast exception</a>.
+   *
+   * <p>BETWEEN is no longer allowed in RexCall. 'a BETWEEN b AND c' is expanded
+   * 'a >= b AND a <= c', whether created via
+   * {@link RelBuilder#call(SqlOperator, RexNode...)} or
+   * {@link RelBuilder#between(RexNode, RexNode, RexNode)}.*/
   @Test void testCallBetweenOperator() {
-    final RelBuilder builder = RelBuilder.create(config().build());
-    final RexNode call = builder.scan("EMP")
-        .call(
-            SqlStdOperatorTable.BETWEEN,
+    final RelBuilder builder = RelBuilder.create(config().build()).scan("EMP");
+
+    final String expected = "SEARCH($0, Sarg[[1..5]])";
+    final RexNode call =
+        builder.call(SqlStdOperatorTable.BETWEEN,
             builder.field("EMPNO"),
             builder.literal(1),
             builder.literal(5));
-    assertThat(call.toStringRaw(), is("BETWEEN ASYMMETRIC($0, 1, 5)"));
+    assertThat(call.toString(), is(expected));
+
+    final RexNode call2 =
+        builder.between(builder.field("EMPNO"),
+            builder.literal(1),
+            builder.literal(5));
+    assertThat(call2.toString(), is(expected));
+
+    final RelNode root = builder.filter(call2).build();
+    final String expectedRel = ""
+        + "LogicalFilter(condition=[SEARCH($0, Sarg[[1..5]])])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(root, hasTree(expectedRel));
+
+    // Consecutive filters are not merged. (For now, anyway.)
+    builder.push(root)
+        .filter(
+            builder.not(
+                builder.equals(builder.field("EMPNO"), builder.literal(3))),
+            builder.equals(builder.field("DEPTNO"), builder.literal(10)));
+    final RelNode root2 = builder.build();
+    final String expectedRel2 = ""
+        + "LogicalFilter(condition=[AND(<>($0, 3), =($7, 10))])\n"
+        + "  LogicalFilter(condition=[SEARCH($0, Sarg[[1..5]])])\n"
+        + "    LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(root2, hasTree(expectedRel2));
+
+    // The conditions in one filter are simplified.
+    builder.scan("EMP")
+        .filter(
+            builder.between(builder.field("EMPNO"),
+                builder.literal(1),
+                builder.literal(5)),
+            builder.not(
+                builder.equals(builder.field("EMPNO"), builder.literal(3))),
+            builder.equals(builder.field("DEPTNO"), builder.literal(10)));
+    final RelNode root3 = builder.build();
+    final String expectedRel3 = ""
+        + "LogicalFilter(condition=[AND(SEARCH($0, Sarg[[1..3), (3..5]]), "
+        + "SEARCH($7, Sarg[10]))])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(root3, hasTree(expectedRel3));
   }
 
   /** Test case for

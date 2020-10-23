@@ -16,11 +16,8 @@
  */
 package org.apache.calcite.rel;
 
-import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.util.Pair;
-
-import org.apiguardian.api.API;
 
 import java.util.List;
 
@@ -45,9 +42,7 @@ public interface RelWriter {
    */
   void explain(RelNode rel, List<Pair<String, Object>> valueList);
 
-  /**
-   * @return detail level at which plan should be generated
-   */
+  /** Returns detail level at which plan should be generated. */
   SqlExplainLevel getDetailLevel();
 
   /**
@@ -87,17 +82,5 @@ public interface RelWriter {
    */
   default boolean nest() {
     return false;
-  }
-
-  /**
-   * Activates {@link RexNode} normalization if {@link SqlExplainLevel#DIGEST_ATTRIBUTES} is used.
-   * Note: the returned value must be closed, and the API is designed to be used with a
-   * try-with-resources.
-   * @return a handle that should be closed to revert normalization state
-   */
-  @API(since = "1.22", status = API.Status.EXPERIMENTAL)
-  default RexNode.Closeable withRexNormalize() {
-    boolean needNormalize = getDetailLevel() == SqlExplainLevel.DIGEST_ATTRIBUTES;
-    return RexNode.withNormalize(needNormalize);
   }
 }

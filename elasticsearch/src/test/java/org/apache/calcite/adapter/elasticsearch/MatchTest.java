@@ -45,6 +45,7 @@ import com.google.common.io.LineProcessor;
 import com.google.common.io.Resources;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceAccessMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -70,12 +71,14 @@ import static org.hamcrest.MatcherAssert.assertThat;
 /**
  * Testing Elasticsearch match query.
  */
+@Disabled("RestClient often timeout in PR CI")
 @ResourceLock(value = "elasticsearch-scrolls", mode = ResourceAccessMode.READ)
 class MatchTest {
 
-  public static final EmbeddedElasticsearchPolicy NODE = EmbeddedElasticsearchPolicy.create();
+  public static final EmbeddedElasticsearchPolicy NODE =
+      EmbeddedElasticsearchPolicy.create();
 
-  /** Default index/type name */
+  /** Default index/type name. */
   private static final String ZIPS = "match-zips";
   private static final int ZIPS_SIZE = 149;
 

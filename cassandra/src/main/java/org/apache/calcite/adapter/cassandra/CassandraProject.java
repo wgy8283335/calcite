@@ -16,7 +16,6 @@
  */
 package org.apache.calcite.adapter.cassandra;
 
-import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -57,11 +56,10 @@ public class CassandraProject extends Project implements CassandraRel {
     return super.computeSelfCost(planner, mq).multiplyBy(0.1);
   }
 
-  public void implement(Implementor implementor) {
+  @Override public void implement(Implementor implementor) {
     implementor.visitChild(0, getInput());
     final CassandraRules.RexToCassandraTranslator translator =
         new CassandraRules.RexToCassandraTranslator(
-            (JavaTypeFactory) getCluster().getTypeFactory(),
             CassandraRules.cassandraFieldNames(getInput().getRowType()));
     final Map<String, String> fields = new LinkedHashMap<>();
     for (Pair<RexNode, String> pair : getNamedProjects()) {

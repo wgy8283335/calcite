@@ -228,6 +228,12 @@ public final class CalciteSystemProperty<T> {
       booleanProperty("calcite.test.cassandra", true);
 
   /**
+   * Whether to run InnoDB tests.
+   */
+  public static final CalciteSystemProperty<Boolean> TEST_INNODB =
+      booleanProperty("calcite.test.innodb", true);
+
+  /**
    * Whether to run Redis tests.
    */
   public static final CalciteSystemProperty<Boolean> TEST_REDIS =
@@ -288,12 +294,14 @@ public final class CalciteSystemProperty<T> {
 
   /**
    * The strength of the default collation.
+   * Allowed values (as defined in {@link java.text.Collator}) are: primary, secondary,
+   * tertiary, identical.
    *
    * <p>It is used in {@link org.apache.calcite.sql.SqlCollation} and
    * {@link org.apache.calcite.sql.SqlLiteral#SqlLiteral}.</p>
    */
   // TODO review zabetak:
-  // What are the allowed values? What happens if a wrong value is specified?
+  // What happens if a wrong value is specified?
   public static final CalciteSystemProperty<String> DEFAULT_COLLATION_STRENGTH =
       stringProperty("calcite.default.collation.strength", "primary");
 
@@ -355,8 +363,9 @@ public final class CalciteSystemProperty<T> {
   }
 
   /**
-   * Returns the value of the system property with the specified name as int, or
-   * the <code>defaultValue</code> if any of the conditions below hold:
+   * Returns the value of the system property with the specified name as {@code
+   * int}. If any of the conditions below hold, returns the
+   * <code>defaultValue</code>:
    *
    * <ol>
    * <li>the property is not defined;

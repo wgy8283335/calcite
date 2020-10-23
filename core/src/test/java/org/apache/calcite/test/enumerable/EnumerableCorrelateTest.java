@@ -22,8 +22,7 @@ import org.apache.calcite.adapter.java.ReflectiveSchema;
 import org.apache.calcite.config.CalciteConnectionProperty;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.plan.RelOptPlanner;
-import org.apache.calcite.rel.rules.FilterCorrelateRule;
-import org.apache.calcite.rel.rules.JoinToCorrelateRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.test.CalciteAssert;
@@ -40,7 +39,8 @@ import java.util.function.Consumer;
 class EnumerableCorrelateTest {
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-2605">[CALCITE-2605]
-   * NullPointerException when left outer join implemented with EnumerableCorrelate</a> */
+   * NullPointerException when left outer join implemented with
+   * EnumerableCorrelate</a>. */
   @Test void leftOuterJoinCorrelate() {
     tester(false, new JdbcTest.HrSchema())
         .query(
@@ -48,8 +48,9 @@ class EnumerableCorrelateTest {
         .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner -> {
           // force the left outer join to run via EnumerableCorrelate
           // instead of EnumerableHashJoin
-          planner.addRule(JoinToCorrelateRule.INSTANCE);
+          planner.addRule(CoreRules.JOIN_TO_CORRELATE);
           planner.removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
+          planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
         })
         .explainContains(""
             + "EnumerableCalc(expr#0..4=[{inputs}], empid=[$t0], name=[$t2], dept=[$t4])\n"
@@ -83,7 +84,7 @@ class EnumerableCorrelateTest {
 
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-2621">[CALCITE-2621]
-   * Add rule to execute semi joins with correlation</a> */
+   * Add rule to execute semi joins with correlation</a>. */
   @Test void semiJoinCorrelate() {
     tester(false, new JdbcTest.HrSchema())
         .query(
@@ -91,7 +92,7 @@ class EnumerableCorrelateTest {
         .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner -> {
           // force the semijoin to run via EnumerableCorrelate
           // instead of EnumerableHashJoin(SEMI)
-          planner.addRule(JoinToCorrelateRule.INSTANCE);
+          planner.addRule(CoreRules.JOIN_TO_CORRELATE);
           planner.removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
           planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
         })
@@ -110,8 +111,8 @@ class EnumerableCorrelateTest {
 
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-2930">[CALCITE-2930]
-   * FilterCorrelateRule on a Correlate with SemiJoinType SEMI (or ANTI)
-   * throws IllegalStateException</a> */
+   * FilterCorrelateRule on a Correlate with SemiJoinType SEMI (or ANTI) throws
+   * IllegalStateException</a>. */
   @Test void semiJoinCorrelateWithFilterCorrelateRule() {
     tester(false, new JdbcTest.HrSchema())
         .query(
@@ -120,8 +121,8 @@ class EnumerableCorrelateTest {
           // force the semijoin to run via EnumerableCorrelate
           // instead of EnumerableHashJoin(SEMI),
           // and push the 'empid > 100' filter into the Correlate
-          planner.addRule(JoinToCorrelateRule.INSTANCE);
-          planner.addRule(FilterCorrelateRule.INSTANCE);
+          planner.addRule(CoreRules.JOIN_TO_CORRELATE);
+          planner.addRule(CoreRules.FILTER_CORRELATE);
           planner.removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
           planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
         })
@@ -176,7 +177,7 @@ class EnumerableCorrelateTest {
         .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner -> {
           // force the antijoin to run via EnumerableCorrelate
           // instead of EnumerableHashJoin(ANTI)
-          planner.addRule(JoinToCorrelateRule.INSTANCE);
+          planner.addRule(CoreRules.JOIN_TO_CORRELATE);
           planner.removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
         })
         .withRel(
@@ -205,7 +206,7 @@ class EnumerableCorrelateTest {
         .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner -> {
           // force the antijoin to run via EnumerableCorrelate
           // instead of EnumerableNestedLoopJoin
-          planner.addRule(JoinToCorrelateRule.INSTANCE);
+          planner.addRule(CoreRules.JOIN_TO_CORRELATE);
           planner.removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
         })
         .withRel(
@@ -237,7 +238,7 @@ class EnumerableCorrelateTest {
 
   /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-2920">[CALCITE-2920]
-   * RelBuilder: new method to create an antijoin</a> */
+   * RelBuilder: new method to create an antijoin</a>. */
   @Test void antiJoinCorrelateWithNullValues() {
     final Integer salesDeptNo = 10;
     tester(false, new JdbcTest.HrSchema())
@@ -245,7 +246,7 @@ class EnumerableCorrelateTest {
         .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner -> {
           // force the antijoin to run via EnumerableCorrelate
           // instead of EnumerableHashJoin(ANTI)
-          planner.addRule(JoinToCorrelateRule.INSTANCE);
+          planner.addRule(CoreRules.JOIN_TO_CORRELATE);
           planner.removeRule(EnumerableRules.ENUMERABLE_JOIN_RULE);
         })
         .withRel(

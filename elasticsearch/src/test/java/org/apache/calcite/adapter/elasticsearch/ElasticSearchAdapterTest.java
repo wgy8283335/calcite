@@ -31,6 +31,7 @@ import com.google.common.io.LineProcessor;
 import com.google.common.io.Resources;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceAccessMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -54,12 +55,13 @@ import java.util.function.Consumer;
  * Set of tests for ES adapter. Uses real instance via {@link EmbeddedElasticsearchPolicy}. Document
  * source is local {@code zips-mini.json} file (located in test classpath).
  */
+@Disabled("RestClient often timeout in PR CI")
 @ResourceLock(value = "elasticsearch-scrolls", mode = ResourceAccessMode.READ)
 class ElasticSearchAdapterTest {
 
   public static final EmbeddedElasticsearchPolicy NODE = EmbeddedElasticsearchPolicy.create();
 
-  /** Default index/type name */
+  /** Default index/type name. */
   private static final String ZIPS = "zips";
   private static final int ZIPS_SIZE = 149;
 
@@ -127,9 +129,7 @@ class ElasticSearchAdapterTest {
         .with(newConnectionFactory());
   }
 
-  /**
-   * Tests using calcite view
-   */
+  /** Tests using a Calcite view. */
   @Test void view() {
     calciteAssert()
         .query("select * from zips where city = 'BROOKLYN'")
@@ -332,9 +332,7 @@ class ElasticSearchAdapterTest {
         .returns("EXPR$0=111396.0; EXPR$1=88241.0; EXPR$2=NY\n");
   }
 
-  /**
-   * Sort by multiple fields (in different direction: asc/desc)
-   */
+  /** Tests sorting by multiple fields (in different direction: asc/desc). */
   @Test void sortAscDesc() {
     final String sql = "select city, state, pop from zips\n"
         + "order by pop desc, state asc, city desc limit 3";
@@ -658,9 +656,7 @@ class ElasticSearchAdapterTest {
             "EXPR$0=51008; EXPR$1=57187; state=WI");
   }
 
-  /**
-   * Testing {@code NOT} operator
-   */
+  /** Tests the {@code NOT} operator. */
   @Test void notOperator() {
     // largest zips (states) in mini-zip by pop (sorted) : IL, NY, CA, MI
     calciteAssert()

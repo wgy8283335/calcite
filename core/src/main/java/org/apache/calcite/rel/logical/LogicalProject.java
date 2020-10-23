@@ -136,4 +136,12 @@ public final class LogicalProject extends Project {
     return new LogicalProject(getCluster(), traitSet, hintList,
         input, getProjects(), rowType);
   }
+
+  @Override public boolean deepEquals(Object obj) {
+    return deepEquals0(obj);
+  }
+
+  @Override public int deepHashCode() {
+    return deepHashCode0();
+  }
 }

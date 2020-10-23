@@ -22,7 +22,6 @@ import com.google.common.collect.ImmutableMap;
 import org.cassandraunit.CQLDataLoader;
 import org.cassandraunit.dataset.cql.ClassPathCQLDataSet;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.parallel.Execution;
@@ -77,6 +76,35 @@ class CassandraAdapterDataTypesTest {
                 + ", f_uuid CHAR"
                 + ", f_varchar VARCHAR"
                 + ", f_varint INTEGER]");
+  }
+
+  @Test void testFilterWithNonStringLiteral() {
+    CalciteAssert.that()
+        .with(DTCASSANDRA)
+        .query("select * from \"test_type\" where \"f_id\" = 1")
+        .returns("");
+
+    CalciteAssert.that()
+        .with(DTCASSANDRA)
+        .query("select * from \"test_type\" where \"f_id\" > 1")
+        .returns("f_id=3000000000; f_user=ANNA\n");
+
+    CalciteAssert.that()
+        .with(DTCASSANDRA)
+        .query("select * from \"test_date_type\" where \"f_date\" = '2015-05-03'")
+        .returns("f_date=2015-05-03; f_user=ANNA\n");
+
+    CalciteAssert.that()
+        .with(DTCASSANDRA)
+        .query("select * from \"test_timestamp_type\" where cast(\"f_timestamp\" as timestamp "
+            + "with local time zone) = '2011-02-03 04:05:00 UTC'")
+        .returns("f_timestamp=2011-02-03 04:05:00; f_user=ANNA\n");
+
+    CalciteAssert.that()
+        .with(DTCASSANDRA)
+        .query("select * from \"test_timestamp_type\" where \"f_timestamp\""
+            + " = '2011-02-03 04:05:00'")
+        .returns("f_timestamp=2011-02-03 04:05:00; f_user=ANNA\n");
   }
 
   @Test void testSimpleTypesValues() {
@@ -147,33 +175,31 @@ class CassandraAdapterDataTypesTest {
         .with(DTCASSANDRA)
         .query("select \"f_list\"[1], "
             + "\"f_map\"['k1'], "
-            + "\"f_tuple\"['1'], "
-            + "\"f_tuple\"['2'], "
-            + "\"f_tuple\"['3']"
+            + "\"test_collections\".\"f_tuple\".\"1\", "
+            + "\"test_collections\".\"f_tuple\".\"2\", "
+            + "\"test_collections\".\"f_tuple\".\"3\""
             + " from \"test_collections\"")
         .typeIs("[EXPR$0 INTEGER"
             + ", EXPR$1 VARCHAR"
-            + ", EXPR$2 BIGINT"
-            + ", EXPR$3 VARBINARY"
-            + ", EXPR$4 TIMESTAMP]");
+            + ", 1 BIGINT"
+            + ", 2 VARBINARY"
+            + ", 3 TIMESTAMP]");
   }
 
-  // ignored as tuple elements returns 'null' when accessed in the select statement
-  @Disabled
   @Test void testCollectionsInnerValues() {
     CalciteAssert.that()
         .with(DTCASSANDRA)
         .query("select \"f_list\"[1], "
             + "\"f_map\"['k1'], "
-            + "\"f_tuple\"['1'], "
-            + "\"f_tuple\"['2'], "
-            + "\"f_tuple\"['3']"
+            + "\"test_collections\".\"f_tuple\".\"1\", "
+            + "\"test_collections\".\"f_tuple\".\"2\", "
+            + "\"test_collections\".\"f_tuple\".\"3\""
             + " from \"test_collections\"")
         .returns("EXPR$0=1"
             + "; EXPR$1=v1"
-            + "; EXPR$2=3000000000"
-            + "; EXPR$3=30ff87"
-            + "; EXPR$4=2015-05-03 13:30:54.234");
+            + "; 1=3000000000"
+            + "; 2=30ff87"
+            + "; 3=2015-05-03 11:30:54\n");
   }
 
   // frozen collections should not affect the row type

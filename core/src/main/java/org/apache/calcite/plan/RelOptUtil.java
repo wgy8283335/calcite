@@ -16,8 +16,6 @@
  */
 package org.apache.calcite.plan;
 
-import org.apache.calcite.adapter.enumerable.EnumerableBindable;
-import org.apache.calcite.adapter.enumerable.EnumerableInterpreterRule;
 import org.apache.calcite.adapter.enumerable.EnumerableRules;
 import org.apache.calcite.avatica.AvaticaConnection;
 import org.apache.calcite.config.CalciteSystemProperty;
@@ -41,6 +39,7 @@ import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.core.RelFactories;
 import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.core.TableScan;
+import org.apache.calcite.rel.externalize.RelDotWriter;
 import org.apache.calcite.rel.externalize.RelJsonWriter;
 import org.apache.calcite.rel.externalize.RelWriterImpl;
 import org.apache.calcite.rel.externalize.RelXmlWriter;
@@ -53,16 +52,13 @@ import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
-import org.apache.calcite.rel.rules.JoinAssociateRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.MultiJoin;
-import org.apache.calcite.rel.rules.ProjectTableScanRule;
-import org.apache.calcite.rel.rules.ReduceExpressionsRule;
 import org.apache.calcite.rel.stream.StreamRules;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
-import org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.calcite.rex.LogicVisitor;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
@@ -127,9 +123,8 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
+import java.util.NavigableSet;
 import java.util.Set;
-import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -148,8 +143,7 @@ public abstract class RelOptUtil {
   @SuppressWarnings("Guava")
   @Deprecated // to be removed before 2.0
   public static final com.google.common.base.Predicate<Filter>
-      FILTER_PREDICATE =
-      RelOptUtil::notContainsWindowedAgg;
+      FILTER_PREDICATE = f -> !f.containsOver();
 
   @SuppressWarnings("Guava")
   @Deprecated // to be removed before 2.0
@@ -182,37 +176,31 @@ public abstract class RelOptUtil {
    * Whether this node contains a limit specification.
    */
   public static boolean isLimit(RelNode rel) {
-    if ((rel instanceof Sort) && ((Sort) rel).fetch != null) {
-      return true;
-    }
-    return false;
+    return (rel instanceof Sort) && ((Sort) rel).fetch != null;
   }
 
   /**
    * Whether this node contains a sort specification.
    */
   public static boolean isOrder(RelNode rel) {
-    if ((rel instanceof Sort) && !((Sort) rel).getCollation().getFieldCollations().isEmpty()) {
-      return true;
-    }
-    return false;
+    return (rel instanceof Sort) && !((Sort) rel).getCollation().getFieldCollations().isEmpty();
   }
 
   /**
-   * Returns a set of tables used by this expression or its children
+   * Returns a set of tables used by this expression or its children.
    */
   public static Set<RelOptTable> findTables(RelNode rel) {
     return new LinkedHashSet<>(findAllTables(rel));
   }
 
   /**
-   * Returns a list of all tables used by this expression or its children
+   * Returns a list of all tables used by this expression or its children.
    */
   public static List<RelOptTable> findAllTables(RelNode rel) {
     final Multimap<Class<? extends RelNode>, RelNode> nodes =
         rel.getCluster().getMetadataQuery().getNodeTypes(rel);
     final List<RelOptTable> usedTables = new ArrayList<>();
-    for (Entry<Class<? extends RelNode>, Collection<RelNode>> e : nodes.asMap().entrySet()) {
+    for (Map.Entry<Class<? extends RelNode>, Collection<RelNode>> e : nodes.asMap().entrySet()) {
       if (TableScan.class.isAssignableFrom(e.getKey())) {
         for (RelNode node : e.getValue()) {
           usedTables.add(node.getTable());
@@ -227,8 +215,9 @@ public abstract class RelOptUtil {
    * or its children.
    */
   public static List<String> findAllTableQualifiedNames(RelNode rel) {
-    return Lists.transform(findAllTables(rel),
-        table -> table.getQualifiedName().toString());
+    return findAllTables(rel).stream()
+        .map(table -> table.getQualifiedName().toString())
+        .collect(Collectors.toList());
   }
 
   /**
@@ -242,6 +231,7 @@ public abstract class RelOptUtil {
   }
 
   @Deprecated // to be removed before 2.0
+  @SuppressWarnings("MixedMutabilityReturnType")
   public static List<CorrelationId> getVariablesSetAndUsed(RelNode rel0,
       RelNode rel1) {
     Set<CorrelationId> set = getVariablesSet(rel0);
@@ -327,7 +317,7 @@ public abstract class RelOptUtil {
    * @see org.apache.calcite.rel.type.RelDataType#getFieldNames()
    */
   public static List<RelDataType> getFieldTypeList(final RelDataType type) {
-    return Lists.transform(type.getFieldList(), RelDataTypeField::getType);
+    return Util.transform(type.getFieldList(), RelDataTypeField::getType);
   }
 
   public static boolean areRowTypesEqual(
@@ -649,6 +639,8 @@ public abstract class RelOptUtil {
     switch (subQueryType) {
     case SCALAR:
       return new Exists(seekRel, false, true);
+    default:
+      break;
     }
 
     switch (logic) {
@@ -657,6 +649,9 @@ public abstract class RelOptUtil {
       if (notIn && !containsNullableFields(seekRel)) {
         logic = Logic.TRUE_FALSE;
       }
+      break;
+    default:
+      break;
     }
     RelNode ret = seekRel;
     final RelOptCluster cluster = seekRel.getCluster();
@@ -939,6 +934,7 @@ public abstract class RelOptUtil {
         null, aggCalls);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link RelBuilder#distinct()}. */
   @Deprecated // to be removed before 2.0
   public static RelNode createDistinctRel(RelNode rel) {
@@ -1522,14 +1518,14 @@ public abstract class RelOptUtil {
         RexNode op0 = operands.get(0);
         RexNode op1 = operands.get(1);
 
-        if (!(RexUtil.containsInputRef(op0))
-            && (op1 instanceof RexInputRef)) {
+        if (!RexUtil.containsInputRef(op0)
+            && op1 instanceof RexInputRef) {
           correlatedJoinKeys.add(op0);
           joinKeys.add((RexInputRef) op1);
           return;
         } else if (
-            (op0 instanceof RexInputRef)
-                && !(RexUtil.containsInputRef(op1))) {
+            op0 instanceof RexInputRef
+                && !RexUtil.containsInputRef(op1)) {
           joinKeys.add((RexInputRef) op0);
           correlatedJoinKeys.add(op1);
           return;
@@ -1543,6 +1539,7 @@ public abstract class RelOptUtil {
     nonEquiList.add(condition);
   }
 
+  @SuppressWarnings("unused")
   private static void splitCorrelatedFilterCondition(
       LogicalFilter filter,
       RexNode condition,
@@ -1588,26 +1585,26 @@ public abstract class RelOptUtil {
 
         if (extractCorrelatedFieldAccess) {
           if (!RexUtil.containsFieldAccess(op0)
-              && (op1 instanceof RexFieldAccess)) {
+              && op1 instanceof RexFieldAccess) {
             joinKeys.add(op0);
             correlatedJoinKeys.add(op1);
             return;
           } else if (
-              (op0 instanceof RexFieldAccess)
+              op0 instanceof RexFieldAccess
                   && !RexUtil.containsFieldAccess(op1)) {
             correlatedJoinKeys.add(op0);
             joinKeys.add(op1);
             return;
           }
         } else {
-          if (!(RexUtil.containsInputRef(op0))
-              && (op1 instanceof RexInputRef)) {
+          if (!RexUtil.containsInputRef(op0)
+              && op1 instanceof RexInputRef) {
             correlatedJoinKeys.add(op0);
             joinKeys.add(op1);
             return;
           } else if (
-              (op0 instanceof RexInputRef)
-                  && !(RexUtil.containsInputRef(op1))) {
+              op0 instanceof RexInputRef
+                  && !RexUtil.containsInputRef(op1)) {
             joinKeys.add(op0);
             correlatedJoinKeys.add(op1);
             return;
@@ -1856,8 +1853,6 @@ public abstract class RelOptUtil {
     RelNode rightRel = inputRels[1];
     final RelOptCluster cluster = leftRel.getCluster();
     final RexBuilder rexBuilder = cluster.getRexBuilder();
-    final RelDataTypeSystem typeSystem =
-        cluster.getTypeFactory().getTypeSystem();
 
     int origLeftInputSize = leftRel.getRowType().getFieldCount();
     int origRightInputSize = rightRel.getRowType().getFieldCount();
@@ -1993,7 +1988,7 @@ public abstract class RelOptUtil {
   public static void registerAbstractRelationalRules(RelOptPlanner planner) {
     RelOptRules.ABSTRACT_RELATIONAL_RULES.forEach(planner::addRule);
     if (CalciteSystemProperty.COMMUTE.value()) {
-      planner.addRule(JoinAssociateRule.INSTANCE);
+      planner.addRule(CoreRules.JOIN_ASSOCIATE);
     }
     // todo: rule which makes Project({OrdinalRef}) disappear
   }
@@ -2006,6 +2001,7 @@ public abstract class RelOptUtil {
     RelOptRules.BASE_RULES.forEach(planner::addRule);
   }
 
+  @SuppressWarnings("unused")
   private static void registerReductionRules(RelOptPlanner planner) {
     RelOptRules.CONSTANT_REDUCTION_RULES.forEach(planner::addRule);
   }
@@ -2014,6 +2010,7 @@ public abstract class RelOptUtil {
     RelOptRules.MATERIALIZATION_RULES.forEach(planner::addRule);
   }
 
+  @SuppressWarnings("unused")
   private static void registerCalcRules(RelOptPlanner planner) {
     RelOptRules.CALC_RULES.forEach(planner::addRule);
   }
@@ -2050,17 +2047,16 @@ public abstract class RelOptUtil {
     // we prefer BindableTableScan instead,
     // see BindableTableScan#computeSelfCost.
     planner.addRule(Bindables.BINDABLE_TABLE_SCAN_RULE);
-    planner.addRule(ProjectTableScanRule.INSTANCE);
-    planner.addRule(ProjectTableScanRule.INTERPRETER);
+    planner.addRule(CoreRules.PROJECT_TABLE_SCAN);
+    planner.addRule(CoreRules.PROJECT_INTERPRETER_TABLE_SCAN);
 
     if (CalciteSystemProperty.ENABLE_ENUMERABLE.value()) {
       registerEnumerableRules(planner);
-      planner.addRule(EnumerableInterpreterRule.INSTANCE);
+      planner.addRule(EnumerableRules.TO_INTERPRETER);
     }
 
     if (enableBindable && CalciteSystemProperty.ENABLE_ENUMERABLE.value()) {
-      planner.addRule(
-          EnumerableBindable.EnumerableToBindableConverterRule.INSTANCE);
+      planner.addRule(EnumerableRules.TO_BINDABLE);
     }
 
     if (CalciteSystemProperty.ENABLE_STREAM.value()) {
@@ -2069,15 +2065,7 @@ public abstract class RelOptUtil {
       }
     }
 
-    planner.addRule(ReduceExpressionsRule.FILTER_INSTANCE);
-
-  }
-
-  public static StringBuilder appendRelDescription(
-      StringBuilder sb, RelNode rel) {
-    sb.append("rel#").append(rel.getId())
-        .append(':').append(rel.getDigest());
-    return sb;
+    planner.addRule(CoreRules.FILTER_REDUCE_EXPRESSIONS);
   }
 
   /**
@@ -2109,6 +2097,9 @@ public abstract class RelOptUtil {
       planWriter = new RelJsonWriter();
       rel.explain(planWriter);
       return ((RelJsonWriter) planWriter).asString();
+    case DOT:
+      planWriter = new RelDotWriter(pw, detailLevel, false);
+      break;
     default:
       planWriter = new RelWriterImpl(pw, detailLevel, false);
     }
@@ -2581,6 +2572,9 @@ public abstract class RelOptUtil {
             continue;
           }
         }
+        break;
+      default:
+        break;
       }
       filters.add(node);
     }
@@ -2751,7 +2745,7 @@ public abstract class RelOptUtil {
     final List<RexNode> filtersToRemove = new ArrayList<>();
     for (RexNode filter : filters) {
       final InputFinder inputFinder = InputFinder.analyze(filter);
-      final ImmutableBitSet inputBits = inputFinder.inputBitSet.build();
+      final ImmutableBitSet inputBits = inputFinder.build();
 
       // REVIEW - are there any expressions that need special handling
       // and therefore cannot be pushed?
@@ -2850,7 +2844,7 @@ public abstract class RelOptUtil {
 
   /**
    * Splits a filter into two lists, depending on whether or not the filter
-   * only references its child input
+   * only references its child input.
    *
    * @param childBitmap Fields in the child
    * @param predicate   filters that will be split
@@ -2974,9 +2968,7 @@ public abstract class RelOptUtil {
    */
   public static List<RexNode> pushPastProject(List<? extends RexNode> nodes,
       Project project) {
-    final List<RexNode> list = new ArrayList<>();
-    pushShuttle(project).visitList(nodes, list);
-    return list;
+    return pushShuttle(project).visitList(nodes);
   }
 
   /** As {@link #pushPastProject}, but returns null if the resulting expressions
@@ -2990,7 +2982,7 @@ public abstract class RelOptUtil {
       return null;
     }
     if (RexOver.containsOver(nodes, null)
-        && RexOver.containsOver(project.getProjects(), null)) {
+        && project.containsOver()) {
       // Is it valid relational algebra to apply windowed function to a windowed
       // function? Possibly. But it's invalid SQL, so don't go there.
       return null;
@@ -3068,7 +3060,7 @@ public abstract class RelOptUtil {
         multiJoin.isFullOuterJoin(),
         multiJoin.getOuterJoinConditions(),
         multiJoin.getJoinTypes(),
-        Lists.transform(newProjFields, ImmutableBitSet::fromBitSet),
+        Util.transform(newProjFields, ImmutableBitSet::fromBitSet),
         multiJoin.getJoinFieldRefCountsMap(),
         multiJoin.getPostJoinFilter());
   }
@@ -3119,7 +3111,7 @@ public abstract class RelOptUtil {
     }
     try {
       new RelVisitor() {
-        public void visit(RelNode node, int ordinal, RelNode parent) {
+        @Override public void visit(RelNode node, int ordinal, RelNode parent) {
           if (node == target) {
             throw Util.FoundOne.NULL;
           }
@@ -3256,6 +3248,7 @@ public abstract class RelOptUtil {
         .build();
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use
    * {@link RelBuilder#projectNamed(Iterable, Iterable, boolean)} */
   @Deprecated // to be removed before 2.0
@@ -3278,11 +3271,11 @@ public abstract class RelOptUtil {
     assert fieldNames.size() == fields.size();
     final List<RexNode> refs =
         new AbstractList<RexNode>() {
-          public int size() {
+          @Override public int size() {
             return fields.size();
           }
 
-          public RexNode get(int index) {
+          @Override public RexNode get(int index) {
             return RexInputRef.of(index, fields);
           }
         };
@@ -3392,11 +3385,11 @@ public abstract class RelOptUtil {
     final RelBuilder relBuilder =
         RelBuilder.proto(factory).create(child.getCluster(), null);
     final List<RexNode> exprs = new AbstractList<RexNode>() {
-      public int size() {
+      @Override public int size() {
         return posList.size();
       }
 
-      public RexNode get(int index) {
+      @Override public RexNode get(int index) {
         final int pos = posList.get(index);
         return relBuilder.getRexBuilder().makeInputRef(child, pos);
       }
@@ -3438,17 +3431,17 @@ public abstract class RelOptUtil {
 
   /** Predicate for if a {@link Calc} does not contain windowed aggregates. */
   public static boolean notContainsWindowedAgg(Calc calc) {
-    return !calc.getProgram().containsAggs();
+    return !calc.containsOver();
   }
 
   /** Predicate for if a {@link Filter} does not windowed aggregates. */
   public static boolean notContainsWindowedAgg(Filter filter) {
-    return !RexOver.containsOver(filter.getCondition());
+    return !filter.containsOver();
   }
 
   /** Predicate for if a {@link Project} does not contain windowed aggregates. */
   public static boolean notContainsWindowedAgg(Project project) {
-    return !RexOver.containsOver(project.getProjects(), null);
+    return !project.containsOver();
   }
 
   /** Policies for handling two- and three-valued boolean logic. */
@@ -3555,11 +3548,11 @@ public abstract class RelOptUtil {
           relBuilder.peek().getRowType().getFieldList();
       final List<Pair<RexNode, String>> pairs =
           new AbstractList<Pair<RexNode, String>>() {
-            public int size() {
+            @Override public int size() {
               return leftCount + extraLeftExprs.size();
             }
 
-            public Pair<RexNode, String> get(int index) {
+            @Override public Pair<RexNode, String> get(int index) {
               if (index < leftCount) {
                 RelDataTypeField field = fields.get(index);
                 return Pair.of(
@@ -3579,11 +3572,11 @@ public abstract class RelOptUtil {
       final int newLeftCount = leftCount + extraLeftExprs.size();
       final List<Pair<RexNode, String>> pairs =
           new AbstractList<Pair<RexNode, String>>() {
-            public int size() {
+            @Override public int size() {
               return rightCount + extraRightExprs.size();
             }
 
-            public Pair<RexNode, String> get(int index) {
+            @Override public Pair<RexNode, String> get(int index) {
               if (index < rightCount) {
                 RelDataTypeField field = fields.get(index);
                 return Pair.of(
@@ -3804,7 +3797,7 @@ public abstract class RelOptUtil {
       return true;
     }
     final RexImplicationChecker checker =
-        new RexImplicationChecker(rexBuilder, (RexExecutorImpl) executor,
+        new RexImplicationChecker(rexBuilder, executor,
             rowType);
     final RexNode first =
         RexUtil.composeConjunction(rexBuilder, predicates.pulledUpPredicates);
@@ -3870,7 +3863,7 @@ public abstract class RelOptUtil {
     /**
      * Visits a particular child of a parent.
      */
-    protected RelNode visitChild(RelNode parent, int i, RelNode child) {
+    @Override protected RelNode visitChild(RelNode parent, int i, RelNode child) {
       inheritPaths.forEach(inheritPath -> inheritPath.right.push(i));
       try {
         RelNode child2 = child.accept(this);
@@ -3885,7 +3878,7 @@ public abstract class RelOptUtil {
       }
     }
 
-    public RelNode visit(RelNode other) {
+    @Override public RelNode visit(RelNode other) {
       if (other instanceof Hintable) {
         return visitHintable(other);
       } else {
@@ -4004,7 +3997,7 @@ public abstract class RelOptUtil {
     /**
      * Visits a particular child of a parent.
      */
-    protected RelNode visitChild(RelNode parent, int i, RelNode child) {
+    @Override protected RelNode visitChild(RelNode parent, int i, RelNode child) {
       appendPath.add(i);
       try {
         RelNode child2 = child.accept(this);
@@ -4020,7 +4013,7 @@ public abstract class RelOptUtil {
       }
     }
 
-    public RelNode visit(RelNode other) {
+    @Override public RelNode visit(RelNode other) {
       if (this.appendPath.size() > 3) {
         // Returns early if the visiting depth is bigger than 3
         return other;
@@ -4095,15 +4088,14 @@ public abstract class RelOptUtil {
    *
    * <ul>
    *   <li>Project: remove the hints that have non-empty inherit path
-   *   (which means the hint was not originally declared from it); </li>
-   *   <li>Aggregate: remove the hints that have non-empty inherit path;</>
-   *   <li>Join: remove all the hints;</li>
-   *   <li>TableScan: remove the hints that have non-empty inherit path.</li>
+   *   (which means the hint was not originally declared from it);
+   *   <li>Aggregate: remove the hints that have non-empty inherit path;
+   *   <li>Join: remove all the hints;
+   *   <li>TableScan: remove the hints that have non-empty inherit path.
    * </ul>
-   *
    */
   private static class ResetHintsShuttle extends RelHomogeneousShuttle {
-    public RelNode visit(RelNode node) {
+    @Override public RelNode visit(RelNode node) {
       node = visitChildren(node);
       if (node instanceof Hintable) {
         node = resetHints((Hintable) node);
@@ -4128,7 +4120,7 @@ public abstract class RelOptUtil {
     final Set<CorrelationId> variables = new HashSet<>();
 
     // implement RelVisitor
-    public void visit(
+    @Override public void visit(
         RelNode p,
         int ordinal,
         RelNode parent) {
@@ -4177,9 +4169,9 @@ public abstract class RelOptUtil {
 
   /** Shuttle that finds the set of inputs that are used. */
   public static class InputReferencedVisitor extends RexShuttle {
-    public final SortedSet<Integer> inputPosReferenced = new TreeSet<>();
+    public final NavigableSet<Integer> inputPosReferenced = new TreeSet<>();
 
-    public RexNode visitInputRef(RexInputRef inputRef) {
+    @Override public RexNode visitInputRef(RexInputRef inputRef) {
       inputPosReferenced.add(inputRef.getIndex());
       return inputRef;
     }
@@ -4187,7 +4179,6 @@ public abstract class RelOptUtil {
 
   /** Converts types to descriptive strings. */
   public static class TypeDumper {
-    private final String extraIndent = "  ";
     private String indent;
     private final PrintWriter pw;
 
@@ -4205,6 +4196,7 @@ public abstract class RelOptUtil {
         //   J VARCHAR(240))
         pw.println("RECORD (");
         String prevIndent = indent;
+        String extraIndent = "  ";
         this.indent = indent + extraIndent;
         acceptFields(fields);
         this.indent = prevIndent;
@@ -4244,17 +4236,27 @@ public abstract class RelOptUtil {
    * Visitor which builds a bitmap of the inputs used by an expression.
    */
   public static class InputFinder extends RexVisitorImpl<Void> {
-    public final ImmutableBitSet.Builder inputBitSet;
+    private final ImmutableBitSet.Builder bitBuilder;
     private final Set<RelDataTypeField> extraFields;
+
+    private InputFinder(Set<RelDataTypeField> extraFields,
+        ImmutableBitSet.Builder bitBuilder) {
+      super(true);
+      this.bitBuilder = bitBuilder;
+      this.extraFields = extraFields;
+    }
 
     public InputFinder() {
       this(null);
     }
 
     public InputFinder(Set<RelDataTypeField> extraFields) {
-      super(true);
-      this.inputBitSet = ImmutableBitSet.builder();
-      this.extraFields = extraFields;
+      this(extraFields, ImmutableBitSet.builder());
+    }
+
+    public InputFinder(Set<RelDataTypeField> extraFields,
+        ImmutableBitSet initialBits) {
+      this(extraFields, initialBits.rebuild());
     }
 
     /** Returns an input finder that has analyzed a given expression. */
@@ -4268,7 +4270,7 @@ public abstract class RelOptUtil {
      * Returns a bit set describing the inputs used by an expression.
      */
     public static ImmutableBitSet bits(RexNode node) {
-      return analyze(node).inputBitSet.build();
+      return analyze(node).build();
     }
 
     /**
@@ -4278,11 +4280,19 @@ public abstract class RelOptUtil {
     public static ImmutableBitSet bits(List<RexNode> exprs, RexNode expr) {
       final InputFinder inputFinder = new InputFinder();
       RexUtil.apply(inputFinder, exprs, expr);
-      return inputFinder.inputBitSet.build();
+      return inputFinder.build();
     }
 
-    public Void visitInputRef(RexInputRef inputRef) {
-      inputBitSet.set(inputRef.getIndex());
+    /** Returns the bit set.
+     *
+     * <p>After calling this method, you cannot do any more visits or call this
+     * method again. */
+    public ImmutableBitSet build() {
+      return bitBuilder.build();
+    }
+
+    @Override public Void visitInputRef(RexInputRef inputRef) {
+      bitBuilder.set(inputRef.getIndex());
       return null;
     }
 
@@ -4313,6 +4323,8 @@ public abstract class RelOptUtil {
     private final int[] adjustments;
 
     /**
+     * Creates a RexInputConverter.
+     *
      * @param rexBuilder      builder for creating new RexInputRefs
      * @param srcFields       fields where the RexInputRefs originated
      *                        from; if null, a new RexInputRef is always
@@ -4379,7 +4391,7 @@ public abstract class RelOptUtil {
       this(rexBuilder, srcFields, null, null, null, adjustments);
     }
 
-    public RexNode visitInputRef(RexInputRef var) {
+    @Override public RexNode visitInputRef(RexInputRef var) {
       int srcIndex = var.getIndex();
       int destIndex = srcIndex + adjustments[srcIndex];
 
@@ -4458,7 +4470,7 @@ public abstract class RelOptUtil {
   }
 
   /** Result of calling
-   * {@link org.apache.calcite.plan.RelOptUtil#createExistsPlan} */
+   * {@link org.apache.calcite.plan.RelOptUtil#createExistsPlan}. */
   public static class Exists {
     public final RelNode r;
     public final boolean indicator;

@@ -22,22 +22,11 @@ import org.apache.calcite.plan.hep.HepProgram;
 import org.apache.calcite.plan.hep.HepProgramBuilder;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.RelFactories;
-import org.apache.calcite.rel.rules.CalcMergeRule;
-import org.apache.calcite.rel.rules.FilterAggregateTransposeRule;
-import org.apache.calcite.rel.rules.FilterCalcMergeRule;
-import org.apache.calcite.rel.rules.FilterJoinRule;
-import org.apache.calcite.rel.rules.FilterMergeRule;
-import org.apache.calcite.rel.rules.FilterProjectTransposeRule;
-import org.apache.calcite.rel.rules.FilterToCalcRule;
-import org.apache.calcite.rel.rules.ProjectCalcMergeRule;
-import org.apache.calcite.rel.rules.ProjectJoinTransposeRule;
-import org.apache.calcite.rel.rules.ProjectMergeRule;
-import org.apache.calcite.rel.rules.ProjectRemoveRule;
-import org.apache.calcite.rel.rules.ProjectSetOpTransposeRule;
-import org.apache.calcite.rel.rules.ProjectToCalcRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.sql2rel.RelFieldTrimmer;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.util.Pair;
+import org.apache.calcite.util.Util;
 import org.apache.calcite.util.graph.DefaultDirectedGraph;
 import org.apache.calcite.util.graph.DefaultEdge;
 import org.apache.calcite.util.graph.DirectedGraph;
@@ -46,7 +35,6 @@ import org.apache.calcite.util.graph.TopologicalOrderIterator;
 
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 import java.util.ArrayList;
@@ -114,7 +102,7 @@ public abstract class RelOptMaterializations {
     final List<Pair<RelNode, RelOptLattice>> latticeUses = new ArrayList<>();
     final Set<List<String>> queryTableNames =
         Sets.newHashSet(
-            Iterables.transform(queryTables, RelOptTable::getQualifiedName));
+            Util.transform(queryTables, RelOptTable::getQualifiedName));
     // Remember leaf-join form of root so we convert at most once.
     final Supplier<RelNode> leafJoinRoot =
         Suppliers.memoize(() -> RelOptMaterialization.toLeafJoinForm(rel))::get;
@@ -200,20 +188,20 @@ public abstract class RelOptMaterializations {
     target = trimUnusedfields(target);
     HepProgram program =
         new HepProgramBuilder()
-            .addRuleInstance(FilterProjectTransposeRule.INSTANCE)
-            .addRuleInstance(FilterMergeRule.INSTANCE)
-            .addRuleInstance(FilterJoinRule.FILTER_ON_JOIN)
-            .addRuleInstance(FilterJoinRule.JOIN)
-            .addRuleInstance(FilterAggregateTransposeRule.INSTANCE)
-            .addRuleInstance(ProjectMergeRule.INSTANCE)
-            .addRuleInstance(ProjectRemoveRule.INSTANCE)
-            .addRuleInstance(ProjectJoinTransposeRule.INSTANCE)
-            .addRuleInstance(ProjectSetOpTransposeRule.INSTANCE)
-            .addRuleInstance(FilterToCalcRule.INSTANCE)
-            .addRuleInstance(ProjectToCalcRule.INSTANCE)
-            .addRuleInstance(FilterCalcMergeRule.INSTANCE)
-            .addRuleInstance(ProjectCalcMergeRule.INSTANCE)
-            .addRuleInstance(CalcMergeRule.INSTANCE)
+            .addRuleInstance(CoreRules.FILTER_PROJECT_TRANSPOSE)
+            .addRuleInstance(CoreRules.FILTER_MERGE)
+            .addRuleInstance(CoreRules.FILTER_INTO_JOIN)
+            .addRuleInstance(CoreRules.JOIN_CONDITION_PUSH)
+            .addRuleInstance(CoreRules.FILTER_AGGREGATE_TRANSPOSE)
+            .addRuleInstance(CoreRules.PROJECT_MERGE)
+            .addRuleInstance(CoreRules.PROJECT_REMOVE)
+            .addRuleInstance(CoreRules.PROJECT_JOIN_TRANSPOSE)
+            .addRuleInstance(CoreRules.PROJECT_SET_OP_TRANSPOSE)
+            .addRuleInstance(CoreRules.FILTER_TO_CALC)
+            .addRuleInstance(CoreRules.PROJECT_TO_CALC)
+            .addRuleInstance(CoreRules.FILTER_CALC_MERGE)
+            .addRuleInstance(CoreRules.PROJECT_CALC_MERGE)
+            .addRuleInstance(CoreRules.CALC_MERGE)
             .build();
 
     // We must use the same HEP planner for the two optimizations below.
@@ -254,8 +242,8 @@ public abstract class RelOptMaterializations {
       Set<RelOptTable> usedTables,
       Graphs.FrozenGraph<List<String>, DefaultEdge> usesGraph) {
     for (RelOptTable queryTable : usedTables) {
-      if (usesGraph.getShortestPath(queryTable.getQualifiedName(), qualifiedName)
-          != null) {
+      if (usesGraph.getShortestDistance(queryTable.getQualifiedName(), qualifiedName)
+          != -1) {
         return true;
       }
     }

@@ -36,7 +36,7 @@ public class RexSqlReflectiveConvertletTable implements RexSqlConvertletTable {
 
   //~ Methods ----------------------------------------------------------------
 
-  public RexSqlConvertlet get(RexCall call) {
+  @Override public RexSqlConvertlet get(RexCall call) {
     RexSqlConvertlet convertlet;
     final SqlOperator op = call.getOperator();
 
@@ -72,7 +72,7 @@ public class RexSqlReflectiveConvertletTable implements RexSqlConvertletTable {
   }
 
   /**
-   * Registers a convertlet for a given operator instance
+   * Registers a convertlet for a given operator instance.
    *
    * @param op         Operator instance, say
    * {@link org.apache.calcite.sql.fun.SqlStdOperatorTable#MINUS}

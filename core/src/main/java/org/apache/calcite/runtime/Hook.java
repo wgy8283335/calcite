@@ -64,6 +64,9 @@ public enum Hook {
    * Janino. */
   JAVA_PLAN,
 
+  /** Called before SqlToRelConverter is built. */
+  SQL2REL_CONVERTER_CONFIG_BUILDER,
+
   /** Called with the output of sql-to-rel-converter. */
   CONVERTED,
 
@@ -99,9 +102,11 @@ public enum Hook {
   @API(since = "1.22", status = API.Status.EXPERIMENTAL)
   PLAN_BEFORE_IMPLEMENTATION;
 
+  @SuppressWarnings("ImmutableEnumChecker")
   private final List<Consumer<Object>> handlers =
       new CopyOnWriteArrayList<>();
 
+  @SuppressWarnings("ImmutableEnumChecker")
   private final ThreadLocal<List<Consumer<Object>>> threadHandlers =
       ThreadLocal.withInitial(ArrayList::new);
 
@@ -130,8 +135,9 @@ public enum Hook {
     return () -> remove(handler);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #add(Consumer)}. */
-  @SuppressWarnings("Guava")
+  @SuppressWarnings({"Guava", "ReturnValueIgnored"})
   @Deprecated // to be removed before 2.0
   public <T, R> Closeable add(final Function<T, R> handler) {
     return add((Consumer<T>) handler::apply);
@@ -149,6 +155,7 @@ public enum Hook {
     return () -> removeThread(handler);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #addThread(Consumer)}. */
   @SuppressWarnings("Guava")
   @Deprecated // to be removed before 2.0
@@ -162,6 +169,7 @@ public enum Hook {
     return threadHandlers.get().remove(handler);
   }
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Use {@link #propertyJ}. */
   @SuppressWarnings("Guava")
   @Deprecated // return type will change in 2.0

@@ -58,6 +58,10 @@ public class HiveSqlDialect extends SqlDialect {
     return false;
   }
 
+  @Override public boolean supportsAliasedValues() {
+    return false;
+  }
+
   @Override public void unparseOffsetFetch(SqlWriter writer, SqlNode offset,
       SqlNode fetch) {
     unparseFetchUsingLimit(writer, offset, fetch);
@@ -136,6 +140,8 @@ public class HiveSqlDialect extends SqlDialect {
         SqlAlienSystemTypeNameSpec typeNameSpec = new SqlAlienSystemTypeNameSpec(
             "INT", type.getSqlTypeName(), SqlParserPos.ZERO);
         return new SqlDataTypeSpec(typeNameSpec, SqlParserPos.ZERO);
+      default:
+        break;
       }
     }
     return super.getCastSpec(type);

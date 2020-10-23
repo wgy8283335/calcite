@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Unit test for
- * {@link org.apache.calcite.adapter.enumerable.EnumerableCalc}
+ * {@link org.apache.calcite.adapter.enumerable.EnumerableCalc}.
  */
 class EnumerableCalcTest {
 
@@ -47,7 +47,7 @@ class EnumerableCalcTest {
                     builder.field("commission"),
                     builder.literal(0)))
                 .build())
-        .planContains("inp4_ != null ? inp4_.intValue() : 0;")
+        .planContains("input_value != null ? input_value : 0")
         .returnsUnordered(
             "$f0=0",
             "$f0=250",

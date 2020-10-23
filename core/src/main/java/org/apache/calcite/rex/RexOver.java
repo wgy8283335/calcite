@@ -117,11 +117,11 @@ public class RexOver extends RexCall {
     return sb.toString();
   }
 
-  public <R> R accept(RexVisitor<R> visitor) {
+  @Override public <R> R accept(RexVisitor<R> visitor) {
     return visitor.visitOver(this);
   }
 
-  public <R, P> R accept(RexBiVisitor<R, P> visitor, P arg) {
+  @Override public <R, P> R accept(RexBiVisitor<R, P> visitor, P arg) {
     return visitor.visitOver(this, arg);
   }
 
@@ -192,8 +192,33 @@ public class RexOver extends RexCall {
       super(true);
     }
 
-    public Void visitOver(RexOver over) {
+    @Override public Void visitOver(RexOver over) {
       throw OverFound.INSTANCE;
     }
+  }
+
+  @Override public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
+    if (!super.equals(o)) {
+      return false;
+    }
+    RexOver rexOver = (RexOver) o;
+    return distinct == rexOver.distinct
+        && ignoreNulls == rexOver.ignoreNulls
+        && window.equals(rexOver.window)
+        && op.allowsFraming() == rexOver.op.allowsFraming();
+  }
+
+  @Override public int hashCode() {
+    if (hash == 0) {
+      hash = Objects.hash(super.hashCode(), window,
+          distinct, ignoreNulls, op.allowsFraming());
+    }
+    return hash;
   }
 }

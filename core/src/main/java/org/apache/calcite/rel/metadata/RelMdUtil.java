@@ -43,6 +43,7 @@ import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.ReturnTypes;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.NumberUtil;
+import org.apache.calcite.util.Util;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -231,10 +232,7 @@ public class RelMdUtil {
   public static boolean areColumnsDefinitelyUniqueWhenNullsFiltered(
       RelMetadataQuery mq, RelNode rel, ImmutableBitSet colMask) {
     Boolean b = mq.areColumnsUnique(rel, colMask, true);
-    if (b == null) {
-      return false;
-    }
-    return b;
+    return b != null && b;
   }
 
   public static Boolean areColumnsUniqueWhenNullsFiltered(RelMetadataQuery mq,
@@ -251,10 +249,7 @@ public class RelMdUtil {
   public static boolean areColumnsDefinitelyUniqueWhenNullsFiltered(
       RelMetadataQuery mq, RelNode rel, List<RexInputRef> columnRefs) {
     Boolean b = areColumnsUniqueWhenNullsFiltered(mq, rel, columnRefs);
-    if (b == null) {
-      return false;
-    }
-    return b;
+    return b != null && b;
   }
 
   /**
@@ -289,9 +284,12 @@ public class RelMdUtil {
    * between 1 and 100, you'll most likely end up with fewer than 100 distinct
    * values, because you'll pick some values more than once.
    *
-   * @param domainSize  number of distinct values in the domain
-   * @param numSelected number selected from the domain
-   * @return number of distinct values for subset selected
+   * The implementation is an unbiased estimation of the number of distinct values
+   * by performing a number of selections (with replacement) from a universe set.
+   *
+   * @param domainSize size of the universe set.
+   * @param numSelected the number of selections.
+   * @return the expected number of distinct values.
    */
   public static Double numDistinctVals(
       Double domainSize,
@@ -305,24 +303,34 @@ public class RelMdUtil {
     double dSize = capInfinity(domainSize);
     double numSel = capInfinity(numSelected);
 
-    // The formula for this is:
-    // 1. Assume we pick 80 random values between 1 and 100.
-    // 2. The chance we skip any given value is .99 ^ 80
-    // 3. Thus on average we will skip .99 ^ 80 percent of the values
-    //    in the domain
-    // 4. Generalized, we skip ( (n-1)/n ) ^ k values where n is the
-    //    number of possible values and k is the number we are selecting
-    // 5. This can be rewritten via approximation (if you want to
-    //    know why approximation is called for here, ask Bill Keese):
-    //  ((n-1)/n) ^ k
-    //  = e ^ ln( ((n-1)/n) ^ k )
-    //  = e ^ (k * ln ((n-1)/n))
-    //  = e ^ (k * ln (1-1/n))
-    // ~= e ^ (k * (-1/n))  because ln(1+x) ~= x for small x
-    //  = e ^ (-k/n)
-    // 6. Flipping it from number skipped to number visited, we get:
-    double res =
-        (dSize > 0) ? ((1.0 - Math.exp(-1 * numSel / dSize)) * dSize) : 0;
+    // The formula is derived as follows:
+    //
+    // Suppose we have N distinct values, and we select n from them (with replacement).
+    // For any value i, we use C(i) = k to express the event that the value is selected exactly
+    // k times in the n selections.
+    //
+    // It can be seen that, for any one selection, the probability of the value being selected
+    // is 1/N. So the probability of being selected exactly k times is
+    //
+    // Pr{C(i) = k} = C(n, k) * (1 / N)^k * (1 - 1 / N)^(n - k),
+    // where C(n, k) = n! / [k! * (n - k)!]
+    //
+    // The probability that the value is never selected is
+    // Pr{C(i) = 0} = C(n, 0) * (1/N)^0 * (1 - 1 / N)^n = (1 - 1 / N)^n
+    //
+    // We define indicator random variable I(i), so that I(i) = 1 iff
+    // value i is selected in at least one of the selections. We have
+    // E[I(i)] = 1 * Pr{I(i) = 1} + 0 * Pr{I(i) = 0) = Pr{I(i) = 1}
+    // = Pr{C(i) > 0} = 1 - Pr{C(i) = 0} = 1 - (1 - 1 / N)^n
+    //
+    // The expected number of distinct values in the overall n selections is:
+    // E(I(1)] + E(I(2)] + ... + E(I(N)] = N * [1 - (1 - 1 / N)^n]
+
+    double res = 0;
+    if (dSize > 0) {
+      double expo = numSel * Math.log(1.0 - 1.0 / dSize);
+      res = (1.0 - Math.exp(expo)) * dSize;
+    }
 
     // fix the boundary cases
     if (res > dSize) {
@@ -425,7 +433,7 @@ public class RelMdUtil {
 
   /**
    * Takes the difference between two predicates, removing from the first any
-   * predicates also in the second
+   * predicates also in the second.
    *
    * @param rexBuilder rexBuilder used to construct AND'd RexNode
    * @param pred1      first predicate
@@ -472,7 +480,8 @@ public class RelMdUtil {
 
   /**
    * Forms two bitmaps by splitting the columns in a bitmap according to
-   * whether or not the column references the child input or is an expression
+   * whether or not the column references the child input or is an expression.
+   *
    * @param projExprs Project expressions
    * @param groupKey  Bitmap whose columns will be split
    * @param baseCols  Bitmap representing columns from the child input
@@ -507,22 +516,22 @@ public class RelMdUtil {
   }
 
   /**
-   * Computes the population size for a set of keys returned from a join
+   * Computes the population size for a set of keys returned from a join.
    *
-   * @param joinRel  the join rel
-   * @param groupKey keys to compute the population for
+   * @param join_  Join relational operator
+   * @param groupKey Keys to compute the population for
    * @return computed population size
    */
   public static Double getJoinPopulationSize(RelMetadataQuery mq,
-      RelNode joinRel, ImmutableBitSet groupKey) {
-    Join join = (Join) joinRel;
+      RelNode join_, ImmutableBitSet groupKey) {
+    Join join = (Join) join_;
     if (!join.getJoinType().projectsRight()) {
       return mq.getPopulationSize(join.getLeft(), groupKey);
     }
     ImmutableBitSet.Builder leftMask = ImmutableBitSet.builder();
     ImmutableBitSet.Builder rightMask = ImmutableBitSet.builder();
-    RelNode left = joinRel.getInputs().get(0);
-    RelNode right = joinRel.getInputs().get(1);
+    RelNode left = join.getLeft();
+    RelNode right = join.getRight();
 
     // separate the mask into masks for the left and right
     RelMdUtil.setLeftRightBitmaps(
@@ -533,7 +542,7 @@ public class RelMdUtil {
             mq.getPopulationSize(left, leftMask.build()),
             mq.getPopulationSize(right, rightMask.build()));
 
-    return numDistinctVals(population, mq.getRowCount(joinRel));
+    return numDistinctVals(population, mq.getRowCount(join));
   }
 
   /** Add an epsilon to the value passed in. **/
@@ -560,7 +569,7 @@ public class RelMdUtil {
 
   /**
    * Computes the number of distinct rows for a set of keys returned from a
-   * semi-join
+   * semi-join.
    *
    * @param semiJoinRel RelNode representing the semi-join
    * @param mq          metadata query
@@ -699,9 +708,11 @@ public class RelMdUtil {
       // semijoin filter and pass it to getSelectivity
       RexNode semiJoinSelectivity =
           RelMdUtil.makeSemiJoinSelectivityRexNode(mq, join);
-
+      Double selectivity = mq.getSelectivity(join.getLeft(), semiJoinSelectivity);
       return NumberUtil.multiply(
-          mq.getSelectivity(join.getLeft(), semiJoinSelectivity),
+          join.getJoinType() == JoinRelType.SEMI
+              ? selectivity
+              : NumberUtil.subtract(1D, selectivity), // ANTI join
           mq.getRowCount(join.getLeft()));
     }
     // Row count estimates of 0 will be rounded up to 1.
@@ -717,19 +728,24 @@ public class RelMdUtil {
         return max;
       }
     }
-    double product = left * right;
 
-    return product * mq.getSelectivity(join, condition);
-  }
-
-  /** Returns an estimate of the number of rows returned by a semi-join. */
-  public static Double getSemiJoinRowCount(RelMetadataQuery mq, RelNode left,
-      RelNode right, JoinRelType joinType, RexNode condition) {
-    final Double leftCount = mq.getRowCount(left);
-    if (leftCount == null) {
+    Double selectivity = mq.getSelectivity(join, condition);
+    if (selectivity == null) {
       return null;
     }
-    return leftCount * RexUtil.getSelectivity(condition);
+    double innerRowCount = left * right * selectivity;
+    switch (join.getJoinType()) {
+    case INNER:
+      return innerRowCount;
+    case LEFT:
+      return left * (1D - selectivity) + innerRowCount;
+    case RIGHT:
+      return right * (1D - selectivity) + innerRowCount;
+    case FULL:
+      return (left + right) * (1D - selectivity) + innerRowCount;
+    default:
+      throw Util.unexpected(join.getJoinType());
+    }
   }
 
   public static double estimateFilteredRows(RelNode child, RexProgram program,
@@ -795,7 +811,7 @@ public class RelMdUtil {
       this.rel = rel;
     }
 
-    public Double visitInputRef(RexInputRef var) {
+    @Override public Double visitInputRef(RexInputRef var) {
       int index = var.getIndex();
       ImmutableBitSet col = ImmutableBitSet.of(index);
       Double distinctRowCount =
@@ -807,11 +823,11 @@ public class RelMdUtil {
       }
     }
 
-    public Double visitLiteral(RexLiteral literal) {
+    @Override public Double visitLiteral(RexLiteral literal) {
       return numDistinctVals(1.0, mq.getRowCount(rel));
     }
 
-    public Double visitCall(RexCall call) {
+    @Override public Double visitCall(RexCall call) {
       Double distinctRowCount;
       Double rowCount = mq.getRowCount(rel);
       if (call.isA(SqlKind.MINUS_PREFIX)) {
@@ -854,25 +870,41 @@ public class RelMdUtil {
    * {@link org.apache.calcite.rel.core.Sort} with limit and optional offset. */
   public static boolean checkInputForCollationAndLimit(RelMetadataQuery mq,
       RelNode input, RelCollation collation, RexNode offset, RexNode fetch) {
-    // Check if the input is already sorted
-    boolean alreadySorted = collation.getFieldCollations().isEmpty();
-    for (RelCollation inputCollation : mq.collations(input)) {
+    return alreadySorted(mq, input, collation) && alreadySmaller(mq, input, offset, fetch);
+  }
+
+  // Checks if the input is already sorted
+  private static boolean alreadySorted(RelMetadataQuery mq, RelNode input, RelCollation collation) {
+    if (collation.getFieldCollations().isEmpty()) {
+      return true;
+    }
+    final ImmutableList<RelCollation> collations = mq.collations(input);
+    if (collations == null) {
+      // Cannot be determined
+      return false;
+    }
+    for (RelCollation inputCollation : collations) {
       if (inputCollation.satisfies(collation)) {
-        alreadySorted = true;
-        break;
+        return true;
       }
     }
-    // Check if we are not reducing the number of tuples
-    boolean alreadySmaller = true;
+    return false;
+  }
+
+  // Checks if we are not reducing the number of tuples
+  private static boolean alreadySmaller(RelMetadataQuery mq, RelNode input,
+      RexNode offset, RexNode fetch) {
+    if (fetch == null) {
+      return true;
+    }
     final Double rowCount = mq.getMaxRowCount(input);
-    if (rowCount != null && fetch != null) {
-      final int offsetVal = offset == null ? 0 : RexLiteral.intValue(offset);
-      final int limit = RexLiteral.intValue(fetch);
-      if ((double) offsetVal + (double) limit < rowCount) {
-        alreadySmaller = false;
-      }
+    if (rowCount == null) {
+      // Cannot be determined
+      return false;
     }
-    return alreadySorted && alreadySmaller;
+    final int offsetVal = offset == null ? 0 : RexLiteral.intValue(offset);
+    final int limit = RexLiteral.intValue(fetch);
+    return (double) offsetVal + (double) limit >= rowCount;
   }
 
   /**

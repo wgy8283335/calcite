@@ -47,7 +47,7 @@ public class RelOptRuleOperand {
   public int[] solveOrder;
   public int ordinalInParent;
   public int ordinalInRule;
-  private final RelTrait trait;
+  public final RelTrait trait;
   private final Class<? extends RelNode> clazz;
   private final ImmutableList<RelOptRuleOperand> children;
 
@@ -158,7 +158,7 @@ public class RelOptRuleOperand {
   }
 
   /**
-   * Sets the rule this operand belongs to
+   * Sets the rule this operand belongs to.
    *
    * @param rule containing rule
    */
@@ -166,11 +166,11 @@ public class RelOptRuleOperand {
     this.rule = rule;
   }
 
-  public int hashCode() {
+  @Override public int hashCode() {
     return Objects.hash(clazz, trait, children);
   }
 
-  public boolean equals(Object obj) {
+  @Override public boolean equals(Object obj) {
     if (this == obj) {
       return true;
     }
@@ -249,7 +249,7 @@ public class RelOptRuleOperand {
   }
 
   /**
-   * @return relational expression class matched by this operand
+   * Returns relational expression class matched by this operand.
    */
   public Class<? extends RelNode> getMatchedClass() {
     return clazz;

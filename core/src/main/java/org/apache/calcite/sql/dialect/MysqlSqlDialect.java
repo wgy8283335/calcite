@@ -101,7 +101,7 @@ public class MysqlSqlDialect extends SqlDialect {
     return true;
   }
 
-  public boolean supportsAliasedValues() {
+  @Override public boolean supportsAliasedValues() {
     // MySQL supports VALUES only in INSERT; not in a FROM clause
     return false;
   }
@@ -129,6 +129,8 @@ public class MysqlSqlDialect extends SqlDialect {
       // MySQL 5 does not support standard "GROUP BY ROLLUP(x, y)",
       // only the non-standard "GROUP BY x, y WITH ROLLUP".
       return majorVersion >= 8;
+    default:
+      break;
     }
     return false;
   }
@@ -172,6 +174,8 @@ public class MysqlSqlDialect extends SqlDialect {
               type.getSqlTypeName(),
               SqlParserPos.ZERO),
           SqlParserPos.ZERO);
+    default:
+      break;
     }
     return super.getCastSpec(type);
   }

@@ -24,19 +24,7 @@ import org.apache.calcite.plan.hep.HepPlanner;
 import org.apache.calcite.plan.hep.HepProgram;
 import org.apache.calcite.plan.hep.HepProgramBuilder;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.rules.CalcMergeRule;
-import org.apache.calcite.rel.rules.FilterAggregateTransposeRule;
-import org.apache.calcite.rel.rules.FilterCalcMergeRule;
-import org.apache.calcite.rel.rules.FilterJoinRule;
-import org.apache.calcite.rel.rules.FilterMergeRule;
-import org.apache.calcite.rel.rules.FilterProjectTransposeRule;
-import org.apache.calcite.rel.rules.FilterToCalcRule;
-import org.apache.calcite.rel.rules.ProjectCalcMergeRule;
-import org.apache.calcite.rel.rules.ProjectJoinTransposeRule;
-import org.apache.calcite.rel.rules.ProjectMergeRule;
-import org.apache.calcite.rel.rules.ProjectRemoveRule;
-import org.apache.calcite.rel.rules.ProjectSetOpTransposeRule;
-import org.apache.calcite.rel.rules.ProjectToCalcRule;
+import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeSystem;
 import org.apache.calcite.rex.RexBuilder;
@@ -982,6 +970,77 @@ public class MaterializedViewSubstitutionVisitorTest extends AbstractMaterialize
     sql(mv, query).ok();
   }
 
+  @Test void testConstantFilterInAgg() {
+    final String mv = ""
+        + "select \"name\", count(distinct \"deptno\") as cnt\n"
+        + "from \"emps\" group by \"name\"";
+    final String query = ""
+        + "select count(distinct \"deptno\") as cnt\n"
+        + "from \"emps\" where \"name\" = 'hello'";
+    sql(mv, query).withChecker(
+        resultContains(""
+            + "LogicalCalc(expr#0..1=[{inputs}], expr#2=['hello':VARCHAR], expr#3=[CAST($t0)"
+            + ":VARCHAR], expr#4=[=($t2, $t3)], CNT=[$t1], $condition=[$t4])\n"
+            + "  EnumerableTableScan(table=[[hr, MV0]])")).ok();
+  }
+
+  @Test void testConstantFilterInAgg2() {
+    final String mv = ""
+        + "select \"name\", \"deptno\", count(distinct \"commission\") as cnt\n"
+        + "from \"emps\"\n"
+        + " group by \"name\", \"deptno\"";
+    final String query = ""
+        + "select \"deptno\", count(distinct \"commission\") as cnt\n"
+        + "from \"emps\" where \"name\" = 'hello'\n"
+        + "group by \"deptno\"";
+    sql(mv, query).withChecker(
+        resultContains(""
+            + "LogicalCalc(expr#0..2=[{inputs}], expr#3=['hello':VARCHAR], expr#4=[CAST($t0)"
+            + ":VARCHAR], expr#5=[=($t3, $t4)], deptno=[$t1], CNT=[$t2], $condition=[$t5])\n"
+            + "  EnumerableTableScan(table=[[hr, MV0]])")).ok();
+  }
+
+  @Test void testConstantFilterInAgg3() {
+    final String mv = ""
+        + "select \"name\", \"deptno\", count(distinct \"commission\") as cnt\n"
+        + "from \"emps\"\n"
+        + " group by \"name\", \"deptno\"";
+    final String query = ""
+        + "select \"deptno\", count(distinct \"commission\") as cnt\n"
+        + "from \"emps\" where \"name\" = 'hello' and \"deptno\" = 1\n"
+        + "group by \"deptno\"";
+    sql(mv, query).withChecker(
+        resultContains(""
+            + "LogicalCalc(expr#0..2=[{inputs}], expr#3=['hello':VARCHAR], expr#4=[CAST($t0)"
+            + ":VARCHAR], expr#5=[=($t3, $t4)], expr#6=[1], expr#7=[CAST($t1):INTEGER NOT NULL], "
+            + "expr#8=[=($t6, $t7)], expr#9=[AND($t5, $t8)], deptno=[$t1], CNT=[$t2], "
+            + "$condition=[$t9])\n"
+            + "  EnumerableTableScan(table=[[hr, MV0]])")).ok();
+  }
+
+  @Test void testConstantFilterInAgg4() {
+    final String mv = ""
+        + "select \"name\", \"deptno\", count(distinct \"commission\") as cnt\n"
+        + "from \"emps\"\n"
+        + " group by \"name\", \"deptno\"";
+    final String query = ""
+        + "select \"deptno\", \"commission\", count(distinct \"commission\") as cnt\n"
+        + "from \"emps\" where \"name\" = 'hello' and \"deptno\" = 1\n"
+        + "group by \"deptno\", \"commission\"";
+    sql(mv, query).noMat();
+  }
+
+  @Test void testConstantFilterInAggUsingSubquery() {
+    final String mv = ""
+        + "select \"name\", count(distinct \"deptno\") as cnt "
+        + "from \"emps\" group by \"name\"";
+    final String query = ""
+        + "select cnt from(\n"
+        + " select \"name\", count(distinct \"deptno\") as cnt "
+        + " from \"emps\" group by \"name\") t\n"
+        + "where \"name\" = 'hello'";
+    sql(mv, query).ok();
+  }
 
   /** Unit test for logic functions
    * {@link org.apache.calcite.plan.SubstitutionVisitor#mayBeSatisfiable} and
@@ -1146,7 +1205,7 @@ public class MaterializedViewSubstitutionVisitorTest extends AbstractMaterialize
   private void checkSatisfiable(RexNode e, String s) {
     assertTrue(SubstitutionVisitor.mayBeSatisfiable(e));
     final RexNode simple = simplify.simplifyUnknownAsFalse(e);
-    assertEquals(s, simple.toStringRaw());
+    assertEquals(s, simple.toString());
   }
 
   @Test void testSplitFilter() {
@@ -1219,7 +1278,7 @@ public class MaterializedViewSubstitutionVisitorTest extends AbstractMaterialize
     newFilter = SubstitutionVisitor.splitFilter(simplify,
         x_eq_1,
         rexBuilder.makeCall(SqlStdOperatorTable.OR, x_eq_1, z_eq_3));
-    assertThat(newFilter.toStringRaw(), equalTo("=($0, 1)"));
+    assertThat(newFilter.toString(), equalTo("=($0, 1)"));
 
     // 2b.
     //   condition: x = 1 or y = 2
@@ -1229,7 +1288,7 @@ public class MaterializedViewSubstitutionVisitorTest extends AbstractMaterialize
     newFilter = SubstitutionVisitor.splitFilter(simplify,
         rexBuilder.makeCall(SqlStdOperatorTable.OR, x_eq_1, y_eq_2),
         rexBuilder.makeCall(SqlStdOperatorTable.OR, x_eq_1, y_eq_2, z_eq_3));
-    assertThat(newFilter.toStringRaw(), equalTo("OR(=($0, 1), =($1, 2))"));
+    assertThat(newFilter.toString(), equalTo("OR(=($0, 1), =($1, 2))"));
 
     // 2c.
     //   condition: x = 1
@@ -1239,7 +1298,7 @@ public class MaterializedViewSubstitutionVisitorTest extends AbstractMaterialize
     newFilter = SubstitutionVisitor.splitFilter(simplify,
         x_eq_1,
         rexBuilder.makeCall(SqlStdOperatorTable.OR, x_eq_1, y_eq_2, z_eq_3));
-    assertThat(newFilter.toStringRaw(),
+    assertThat(newFilter.toString(),
         equalTo("=($0, 1)"));
 
     // 2d.
@@ -1287,7 +1346,7 @@ public class MaterializedViewSubstitutionVisitorTest extends AbstractMaterialize
     newFilter = SubstitutionVisitor.splitFilter(simplify,
         rexBuilder.makeCall(SqlStdOperatorTable.AND, x_eq_1, y_eq_2),
         y_eq_2);
-    assertThat(newFilter.toStringRaw(), equalTo("=($0, 1)"));
+    assertThat(newFilter.toString(), equalTo("=($0, 1)"));
 
     // Example 5.
     //   condition: x = 1
@@ -1475,20 +1534,20 @@ public class MaterializedViewSubstitutionVisitorTest extends AbstractMaterialize
   private RelNode canonicalize(RelNode rel) {
     HepProgram program =
         new HepProgramBuilder()
-            .addRuleInstance(FilterProjectTransposeRule.INSTANCE)
-            .addRuleInstance(FilterMergeRule.INSTANCE)
-            .addRuleInstance(FilterJoinRule.FILTER_ON_JOIN)
-            .addRuleInstance(FilterJoinRule.JOIN)
-            .addRuleInstance(FilterAggregateTransposeRule.INSTANCE)
-            .addRuleInstance(ProjectMergeRule.INSTANCE)
-            .addRuleInstance(ProjectRemoveRule.INSTANCE)
-            .addRuleInstance(ProjectJoinTransposeRule.INSTANCE)
-            .addRuleInstance(ProjectSetOpTransposeRule.INSTANCE)
-            .addRuleInstance(FilterToCalcRule.INSTANCE)
-            .addRuleInstance(ProjectToCalcRule.INSTANCE)
-            .addRuleInstance(FilterCalcMergeRule.INSTANCE)
-            .addRuleInstance(ProjectCalcMergeRule.INSTANCE)
-            .addRuleInstance(CalcMergeRule.INSTANCE)
+            .addRuleInstance(CoreRules.FILTER_PROJECT_TRANSPOSE)
+            .addRuleInstance(CoreRules.FILTER_MERGE)
+            .addRuleInstance(CoreRules.FILTER_INTO_JOIN)
+            .addRuleInstance(CoreRules.JOIN_CONDITION_PUSH)
+            .addRuleInstance(CoreRules.FILTER_AGGREGATE_TRANSPOSE)
+            .addRuleInstance(CoreRules.PROJECT_MERGE)
+            .addRuleInstance(CoreRules.PROJECT_REMOVE)
+            .addRuleInstance(CoreRules.PROJECT_JOIN_TRANSPOSE)
+            .addRuleInstance(CoreRules.PROJECT_SET_OP_TRANSPOSE)
+            .addRuleInstance(CoreRules.FILTER_TO_CALC)
+            .addRuleInstance(CoreRules.PROJECT_TO_CALC)
+            .addRuleInstance(CoreRules.FILTER_CALC_MERGE)
+            .addRuleInstance(CoreRules.PROJECT_CALC_MERGE)
+            .addRuleInstance(CoreRules.CALC_MERGE)
             .build();
     final HepPlanner hepPlanner = new HepPlanner(program);
     hepPlanner.setRoot(rel);

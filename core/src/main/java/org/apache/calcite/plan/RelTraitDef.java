@@ -57,6 +57,7 @@ public abstract class RelTraitDef<T extends RelTrait> {
    *
    * <p>Uses weak interner to allow GC.
    */
+  @SuppressWarnings("BetaApi")
   private final Interner<T> interner = Interners.newWeakInterner();
 
   //~ Constructors -----------------------------------------------------------
@@ -76,15 +77,11 @@ public abstract class RelTraitDef<T extends RelTrait> {
     return false;
   }
 
-  /**
-   * @return the specific RelTrait type associated with this RelTraitDef.
-   */
+  /** Returns the specific RelTrait type associated with this RelTraitDef. */
   public abstract Class<T> getTraitClass();
 
-  /**
-   * @return a simple name for this RelTraitDef (for use in
-   * {@link org.apache.calcite.rel.RelNode#explain}).
-   */
+  /** Returns a simple name for this RelTraitDef (for use in
+   * {@link org.apache.calcite.rel.RelNode#explain}). */
   public abstract String getSimpleName();
 
   /**
@@ -99,6 +96,7 @@ public abstract class RelTraitDef<T extends RelTrait> {
    * @param trait a possibly non-canonical RelTrait
    * @return a canonical RelTrait.
    */
+  @SuppressWarnings("BetaApi")
   public final T canonize(T trait) {
     if (!(trait instanceof RelCompositeTrait)) {
       assert getTraitClass().isInstance(trait)

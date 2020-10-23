@@ -351,6 +351,21 @@ select deptno + 1, count(*) as c from emps group by grouping sets ((), (deptno +
 
 !ok
 
+# GROUPING SETS on single-row relation returns multiple rows
+select 1 as c
+from (values ('a', 'b')) as t (a, b)
+group by grouping sets ((a), (b), (b, a));
++---+
+| C |
++---+
+| 1 |
+| 1 |
+| 1 |
++---+
+(3 rows)
+
+!ok
+
 # CUBE
 select deptno + 1, count(*) as c from emp group by cube(deptno, gender);
 +--------+---+
@@ -1361,6 +1376,23 @@ from (values 0, null, 0, 1) as t(x);
 +---+
 | 1 |
 +---+
+(1 row)
+
+!ok
+
+# Composite COUNT and FILTER
+select count(*) as c,
+  count(*) filter (where z > 1) as cf,
+  count(x) as cx,
+  count(x) filter (where z > 1) as cxf,
+  count(x, y) as cxy,
+  count(x, y) filter (where z > 1) as cxyf
+from (values (1, 1, 1), (2, 2, 2), (3, null, 3), (null, 4, 4)) as t(x, y, z);
++---+----+----+-----+-----+------+
+| C | CF | CX | CXF | CXY | CXYF |
++---+----+----+-----+-----+------+
+| 4 |  3 |  3 |   2 |   2 |    1 |
++---+----+----+-----+-----+------+
 (1 row)
 
 !ok
@@ -2834,6 +2866,22 @@ select
 from emp group by gender;
 +----------------------------------+---------------------------------------+
 | DEFAULT_LISTAGG_SEP              | CUSTOM_LISTAGG_SEP                    |
++----------------------------------+---------------------------------------+
+| Bob,Eric,Adam                    | Bob; Eric; Adam                       |
+| Jane,Alice,Susan,Eve,Grace,Wilma | Jane; Susan; Alice; Eve; Grace; Wilma |
++----------------------------------+---------------------------------------+
+(2 rows)
+
+!ok
+
+# STRING_AGG (BigQuery and PostgreSQL) is very similar to LISTAGG.
+!use post-big-query
+select
+  string_agg(ename order by deptno, ename) as default_string_agg_sep,
+  string_agg(ename, '; ' order by deptno, ename desc) as custom_string_agg_sep
+from emp group by gender;
++----------------------------------+---------------------------------------+
+| DEFAULT_STRING_AGG_SEP           | CUSTOM_STRING_AGG_SEP                 |
 +----------------------------------+---------------------------------------+
 | Bob,Eric,Adam                    | Bob; Eric; Adam                       |
 | Jane,Alice,Susan,Eve,Grace,Wilma | Jane; Susan; Alice; Eve; Grace; Wilma |

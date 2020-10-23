@@ -24,6 +24,7 @@ import org.apache.calcite.sql.SqlOperator;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Parameter type-checking strategy for Explicit Type.
@@ -31,17 +32,17 @@ import java.util.List;
 public class ExplicitOperandTypeChecker implements SqlOperandTypeChecker {
   //~ Methods ----------------------------------------------------------------
 
-  private RelDataType type;
+  private final RelDataType type;
 
   public ExplicitOperandTypeChecker(RelDataType type) {
-    this.type = type;
+    this.type = Objects.requireNonNull(type);
   }
 
-  public boolean isOptional(int i) {
+  @Override public boolean isOptional(int i) {
     return false;
   }
 
-  public boolean checkOperandTypes(
+  @Override public boolean checkOperandTypes(
       SqlCallBinding callBinding,
       boolean throwOnFailure) {
     List<SqlTypeFamily> families = new ArrayList<>();
@@ -61,15 +62,15 @@ public class ExplicitOperandTypeChecker implements SqlOperandTypeChecker {
     return OperandTypes.family(families).checkOperandTypes(callBinding, throwOnFailure);
   }
 
-  public SqlOperandCountRange getOperandCountRange() {
+  @Override public SqlOperandCountRange getOperandCountRange() {
     return SqlOperandCountRanges.of(type.getFieldCount());
   }
 
-  public String getAllowedSignatures(SqlOperator op, String opName) {
+  @Override public String getAllowedSignatures(SqlOperator op, String opName) {
     return "<TYPE> " + opName + " <TYPE>";
   }
 
-  public Consistency getConsistency() {
+  @Override public Consistency getConsistency() {
     return Consistency.NONE;
   }
 }

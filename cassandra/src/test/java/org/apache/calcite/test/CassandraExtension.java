@@ -93,9 +93,8 @@ class CassandraExtension implements ParameterResolver, ExecutionCondition {
             .file().getAbsolutePath());
   }
 
-  /**
-   * Register cassandra resource in root context so it can be shared with other tests
-   */
+  /** Registers a Cassandra resource in root context so it can be shared with
+   * other tests. */
   private static CassandraResource getOrCreate(ExtensionContext context) {
     // same cassandra instance should be shared across all extension instances
     return context.getRoot()
@@ -122,13 +121,16 @@ class CassandraExtension implements ParameterResolver, ExecutionCondition {
     boolean enabled = CalciteSystemProperty.TEST_CASSANDRA.value();
     Bug.upgrade("remove JDK version check once current adapter supports Cassandra 4.x");
     boolean compatibleJdk = TestUtil.getJavaMajorVersion() < 11;
-    if (enabled && compatibleJdk) {
+    boolean compatibleGuava = TestUtil.getGuavaMajorVersion() < 26;
+    if (enabled && compatibleJdk && compatibleGuava) {
       return ConditionEvaluationResult.enabled("Cassandra enabled");
     }
     return ConditionEvaluationResult.disabled("Cassandra tests disabled");
   }
 
-  private static class CassandraResource implements ExtensionContext.Store.CloseableResource {
+  /** Cassandra resource. */
+  private static class CassandraResource
+      implements ExtensionContext.Store.CloseableResource {
     private final Session session;
     private final Cluster cluster;
 

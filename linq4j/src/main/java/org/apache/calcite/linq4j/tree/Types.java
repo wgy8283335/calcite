@@ -345,7 +345,6 @@ public abstract class Types {
       }
     }
     if (constructors.length == 0 && argumentTypes.length == 0) {
-      Constructor[] constructors1 = clazz.getConstructors();
       try {
         return clazz.getConstructor();
       } catch (NoSuchMethodException e) {
@@ -555,15 +554,15 @@ public abstract class Types {
       return buf.toString();
     }
 
-    public Type[] getActualTypeArguments() {
+    @Override public Type[] getActualTypeArguments() {
       return typeArguments.toArray(new Type[0]);
     }
 
-    public Type getRawType() {
+    @Override public Type getRawType() {
       return rawType;
     }
 
-    public Type getOwnerType() {
+    @Override public Type getOwnerType() {
       return ownerType;
     }
   }

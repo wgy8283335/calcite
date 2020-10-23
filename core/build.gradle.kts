@@ -49,6 +49,7 @@ dependencies {
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
     implementation("com.google.code.findbugs:jsr305"/* optional*/)
     implementation("com.google.guava:guava")
+    implementation("com.google.uzaygezen:uzaygezen-core")
     implementation("com.jayway.jsonpath:json-path")
     implementation("com.yahoo.datasketches:sketches-core")
     implementation("commons-codec:commons-codec")
@@ -71,9 +72,6 @@ dependencies {
     testImplementation("net.hydromatic:scott-data-hsqldb")
     testImplementation("org.apache.calcite.avatica:avatica-server")
     testImplementation("org.apache.commons:commons-pool2")
-    testImplementation("log4j:log4j") {
-        because("SqlHintsConverterTest needs to implement a MockAppender")
-    }
     testImplementation("org.hsqldb:hsqldb")
     testImplementation("org.incava:java-diff")
     testImplementation("sqlline:sqlline")
@@ -159,9 +157,9 @@ val fmppMain by tasks.registering(org.apache.calcite.buildtools.fmpp.FmppTask::c
 val javaCCMain by tasks.registering(org.apache.calcite.buildtools.javacc.JavaCCTask::class) {
     dependsOn(fmppMain)
     val parserFile = fmppMain.map {
-        it.output.asFileTree.matching { include("**/Parser.jj") }.singleFile
+        it.output.asFileTree.matching { include("**/Parser.jj") }
     }
-    inputFile.set(parserFile)
+    inputFile.from(parserFile)
     packageName.set("org.apache.calcite.sql.parser.impl")
 }
 
@@ -173,9 +171,9 @@ val fmppTest by tasks.registering(org.apache.calcite.buildtools.fmpp.FmppTask::c
 val javaCCTest by tasks.registering(org.apache.calcite.buildtools.javacc.JavaCCTask::class) {
     dependsOn(fmppTest)
     val parserFile = fmppTest.map {
-        it.output.asFileTree.matching { include("**/Parser.jj") }.singleFile
+        it.output.asFileTree.matching { include("**/Parser.jj") }
     }
-    inputFile.set(parserFile)
+    inputFile.from(parserFile)
     packageName.set("org.apache.calcite.sql.parser.parserextensiontesting")
 }
 

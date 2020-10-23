@@ -17,6 +17,8 @@
 package org.apache.calcite.adapter.csv;
 
 import org.apache.calcite.DataContext;
+import org.apache.calcite.adapter.file.CsvEnumerator;
+import org.apache.calcite.adapter.file.CsvFieldType;
 import org.apache.calcite.linq4j.AbstractEnumerable;
 import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.linq4j.Enumerator;
@@ -24,6 +26,7 @@ import org.apache.calcite.rel.type.RelProtoDataType;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.StreamableTable;
 import org.apache.calcite.schema.Table;
+import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.Source;
 
 import java.util.List;
@@ -46,18 +49,18 @@ public class CsvStreamScannableTable extends CsvScannableTable
     return true;
   }
 
-  public String toString() {
+  @Override public String toString() {
     return "CsvStreamScannableTable";
   }
 
-  public Enumerable<Object[]> scan(DataContext root) {
+  @Override public Enumerable<Object[]> scan(DataContext root) {
     final List<CsvFieldType> fieldTypes = getFieldTypes(root.getTypeFactory());
-    final int[] fields = CsvEnumerator.identityList(fieldTypes.size());
+    final List<Integer> fields = ImmutableIntList.identity(fieldTypes.size());
     final AtomicBoolean cancelFlag = DataContext.Variable.CANCEL_FLAG.get(root);
     return new AbstractEnumerable<Object[]>() {
-      public Enumerator<Object[]> enumerator() {
+      @Override public Enumerator<Object[]> enumerator() {
         return new CsvEnumerator<>(source, cancelFlag, true, null,
-            new CsvEnumerator.ArrayRowConverter(fieldTypes, fields, true));
+            CsvEnumerator.arrayConverter(fieldTypes, fields, true));
       }
     };
   }

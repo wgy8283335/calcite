@@ -28,11 +28,13 @@ import org.apache.calcite.sql.validate.SqlValidatorScope;
 import org.apache.calcite.util.Litmus;
 import org.apache.calcite.util.Util;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collector;
 import javax.annotation.Nonnull;
 
 /**
@@ -64,15 +66,17 @@ public abstract class SqlNode implements Cloneable {
 
   //~ Methods ----------------------------------------------------------------
 
+  // CHECKSTYLE: IGNORE 1
   /** @deprecated Please use {@link #clone(SqlNode)}; this method brings
    * along too much baggage from early versions of Java */
   @Deprecated
-  @SuppressWarnings("MethodDoesntCallSuperMethod")
-  public Object clone() {
+  @SuppressWarnings({"MethodDoesntCallSuperMethod", "AmbiguousMethodReference"})
+  @Override public Object clone() {
     return clone(getParserPosition());
   }
 
   /** Creates a copy of a SqlNode. */
+  @SuppressWarnings("AmbiguousMethodReference")
   public static <E extends SqlNode> E clone(E e) {
     //noinspection unchecked
     return (E) e.clone(e.pos);
@@ -122,7 +126,7 @@ public abstract class SqlNode implements Cloneable {
     return clones;
   }
 
-  public String toString() {
+  @Override public String toString() {
     return toSqlString(c -> c.withDialect(AnsiSqlDialect.DEFAULT)
         .withAlwaysUseParentheses(false)
         .withSelectListItemsOnSeparateLines(false)
@@ -209,6 +213,17 @@ public abstract class SqlNode implements Cloneable {
       SqlWriter writer,
       int leftPrec,
       int rightPrec);
+
+  public void unparseWithParentheses(SqlWriter writer, int leftPrec,
+      int rightPrec, boolean parentheses) {
+    if (parentheses) {
+      final SqlWriter.Frame frame = writer.startList("(", ")");
+      unparse(writer, 0, 0);
+      writer.endList(frame);
+    } else {
+      unparse(writer, leftPrec, rightPrec);
+    }
+  }
 
   public SqlParserPos getParserPosition() {
     return pos;
@@ -337,5 +352,34 @@ public abstract class SqlNode implements Cloneable {
       }
     }
     return litmus.succeed();
+  }
+
+  /**
+   * Returns a {@code Collector} that accumulates the input elements into a
+   * {@link SqlNodeList}, with zero position.
+   *
+   * @param <T> Type of the input elements
+   *
+   * @return a {@code Collector} that collects all the input elements into a
+   * {@link SqlNodeList}, in encounter order
+   */
+  public static <T extends SqlNode> Collector<T, ArrayList<T>, SqlNodeList>
+      toList() {
+    return toList(SqlParserPos.ZERO);
+  }
+
+  /**
+   * Returns a {@code Collector} that accumulates the input elements into a
+   * {@link SqlNodeList}.
+   *
+   * @param <T> Type of the input elements
+   *
+   * @return a {@code Collector} that collects all the input elements into a
+   * {@link SqlNodeList}, in encounter order
+   */
+  public static <T extends SqlNode> Collector<T, ArrayList<T>, SqlNodeList>
+      toList(SqlParserPos pos) {
+    return Collector.of(ArrayList::new, ArrayList::add, Util::combine,
+        list -> new SqlNodeList(list, pos));
   }
 }

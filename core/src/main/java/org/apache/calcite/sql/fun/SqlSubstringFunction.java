@@ -36,7 +36,6 @@ import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlMonotonicity;
-import org.apache.calcite.sql.validate.SqlValidator;
 
 import com.google.common.collect.ImmutableList;
 
@@ -64,7 +63,7 @@ public class SqlSubstringFunction extends SqlFunction {
 
   //~ Methods ----------------------------------------------------------------
 
-  public String getSignatureTemplate(final int operandsCount) {
+  @Override public String getSignatureTemplate(final int operandsCount) {
     switch (operandsCount) {
     case 2:
       return "{0}({1} FROM {2})";
@@ -75,7 +74,7 @@ public class SqlSubstringFunction extends SqlFunction {
     }
   }
 
-  public String getAllowedSignatures(String opName) {
+  @Override public String getAllowedSignatures(String opName) {
     StringBuilder ret = new StringBuilder();
     for (Ord<SqlTypeName> typeName : Ord.zip(SqlTypeName.STRING_TYPES)) {
       if (typeName.i > 0) {
@@ -93,7 +92,7 @@ public class SqlSubstringFunction extends SqlFunction {
     return ret.toString();
   }
 
-  public boolean checkOperandTypes(
+  @Override public boolean checkOperandTypes(
       SqlCallBinding callBinding,
       boolean throwOnFailure) {
     List<SqlNode> operands = callBinding.operands();
@@ -117,9 +116,8 @@ public class SqlSubstringFunction extends SqlFunction {
       // Reset the operands because they may be coerced during
       // implicit type coercion.
       operands = callBinding.getCall().getOperandList();
-      final SqlValidator validator = callBinding.getValidator();
-      final RelDataType t1 = validator.deriveType(callBinding.getScope(), operands.get(1));
-      final RelDataType t2 = validator.deriveType(callBinding.getScope(), operands.get(2));
+      final RelDataType t1 = callBinding.getOperandType(1);
+      final RelDataType t2 = callBinding.getOperandType(2);
       if (SqlTypeUtil.inCharFamily(t1)) {
         if (!SqlTypeUtil.isCharTypeComparable(callBinding, operands,
             throwOnFailure)) {
@@ -136,11 +134,11 @@ public class SqlSubstringFunction extends SqlFunction {
     return true;
   }
 
-  public SqlOperandCountRange getOperandCountRange() {
+  @Override public SqlOperandCountRange getOperandCountRange() {
     return SqlOperandCountRanges.between(2, 3);
   }
 
-  public void unparse(
+  @Override public void unparse(
       SqlWriter writer,
       SqlCall call,
       int leftPrec,
@@ -162,7 +160,8 @@ public class SqlSubstringFunction extends SqlFunction {
     // SUBSTRING(x FROM 0 FOR constant) has same monotonicity as x
     if (call.getOperandCount() == 3) {
       final SqlMonotonicity mono0 = call.getOperandMonotonicity(0);
-      if ((mono0 != SqlMonotonicity.NOT_MONOTONIC)
+      if (mono0 != null
+          && mono0 != SqlMonotonicity.NOT_MONOTONIC
           && call.getOperandMonotonicity(1) == SqlMonotonicity.CONSTANT
           && call.getOperandLiteralValue(1, BigDecimal.class)
               .equals(BigDecimal.ZERO)

@@ -145,7 +145,7 @@ public class MssqlSqlDialect extends SqlDialect {
       if (call.operandCount() != 3) {
         throw new IllegalArgumentException("MSSQL SUBSTRING requires FROM and FOR arguments");
       }
-      SqlUtil.unparseFunctionSyntax(MSSQL_SUBSTRING, writer, call);
+      SqlUtil.unparseFunctionSyntax(MSSQL_SUBSTRING, writer, call, false);
     } else {
       switch (call.getKind()) {
       case FLOOR:
@@ -270,7 +270,7 @@ public class MssqlSqlDialect extends SqlDialect {
   private void unparseSqlIntervalLiteralMssql(
       SqlWriter writer, SqlIntervalLiteral literal, int sign) {
     final SqlIntervalLiteral.IntervalValue interval =
-        (SqlIntervalLiteral.IntervalValue) literal.getValue();
+        literal.getValueAs(SqlIntervalLiteral.IntervalValue.class);
     unparseSqlIntervalQualifier(writer, interval.getIntervalQualifier(),
         RelDataTypeSystem.DEFAULT);
     writer.sep(",", true);

@@ -76,7 +76,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 
@@ -91,9 +90,7 @@ class PigRelOpVisitor extends PigRelOpWalker.PlanPreVisitor {
   protected final PigRelBuilder builder;
   private Operator currentRoot;
 
-  /**
-   * Type of Pig groups
-   */
+  /** Type of Pig groups. */
   private enum GroupType {
     CUBE,
     ROLLUP,
@@ -337,7 +334,7 @@ class PigRelOpVisitor extends PigRelOpWalker.PlanPreVisitor {
   }
 
   /**
-   * Projects out group key and the row for each relation
+   * Projects out group key and the row for each relation.
    *
    * @param loCogroup Pig logical group operator
    * @throws FrontendException Exception during processing Pig operator
@@ -413,7 +410,7 @@ class PigRelOpVisitor extends PigRelOpWalker.PlanPreVisitor {
           cubeRowFields.add(field);
         }
       }
-      return cubeRowFields;
+      return ImmutableList.copyOf(cubeRowFields);
     }
     return rowFields;
   }
@@ -512,7 +509,7 @@ class PigRelOpVisitor extends PigRelOpWalker.PlanPreVisitor {
     boolean[] innerFlags = new boolean[numInputs];
     for (int i = 0; i < numInputs; i++) {
       // Adding empty join keys
-      joinPlans.put(i, new LinkedList<>());
+      joinPlans.put(i, Collections.emptyList());
       innerFlags[i] = true;
     }
     joinInternal(joinPlans, innerFlags);

@@ -31,6 +31,7 @@ import org.apache.calcite.runtime.CalciteException;
 import org.apache.calcite.runtime.Resources;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
+import org.apache.calcite.sql.type.SqlOperandMetadata;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
@@ -135,9 +136,7 @@ public abstract class SqlUtil {
     }
   }
 
-  /**
-   * Converts an SqlNode array to a SqlNodeList
-   */
+  /** Converts a SqlNode array to a SqlNodeList. */
   public static SqlNodeList toNodeList(SqlNode[] operands) {
     SqlNodeList ret = new SqlNodeList(SqlParserPos.ZERO);
     for (SqlNode node : operands) {
@@ -218,16 +217,22 @@ public abstract class SqlUtil {
     if (node instanceof SqlLiteral) {
       return true;
     }
-    if (allowCast) {
-      if (node.getKind() == SqlKind.CAST) {
-        SqlCall call = (SqlCall) node;
-        if (isLiteral(call.operand(0), false)) {
-          // node is "CAST(literal as type)"
-          return true;
-        }
-      }
+    if (!allowCast) {
+      return false;
     }
-    return false;
+    switch (node.getKind()) {
+    case CAST:
+      // "CAST(e AS type)" is literal if "e" is literal
+      return isLiteral(((SqlCall) node).operand(0), true);
+    case MAP_VALUE_CONSTRUCTOR:
+    case ARRAY_VALUE_CONSTRUCTOR:
+      return ((SqlCall) node).getOperandList().stream()
+          .allMatch(o -> isLiteral(o, true));
+    case DEFAULT:
+      return true; // DEFAULT is always NULL
+    default:
+      return false;
+    }
   }
 
   /**
@@ -261,17 +266,24 @@ public abstract class SqlUtil {
     }
   }
 
-  /**
-   * Unparses a call to an operator which has function syntax.
-   *
-   * @param operator    The operator
-   * @param writer      Writer
-   * @param call    List of 0 or more operands
-   */
+  @Deprecated // to be removed before 2.0
   public static void unparseFunctionSyntax(
       SqlOperator operator,
       SqlWriter writer,
       SqlCall call) {
+    unparseFunctionSyntax(operator, writer, call, false);
+  }
+
+  /**
+   * Unparses a call to an operator that has function syntax.
+   *
+   * @param operator    The operator
+   * @param writer      Writer
+   * @param call        List of 0 or more operands
+   * @param ordered     Whether argument list may end with ORDER BY
+   */
+  public static void unparseFunctionSyntax(SqlOperator operator,
+      SqlWriter writer, SqlCall call, boolean ordered) {
     if (operator instanceof SqlFunction) {
       SqlFunction function = (SqlFunction) operator;
 
@@ -295,7 +307,11 @@ public abstract class SqlUtil {
         return;
       case FUNCTION_STAR: // E.g. "COUNT(*)"
       case FUNCTION: // E.g. "RANK()"
+      case ORDERED_FUNCTION: // E.g. "STRING_AGG(x)"
         // fall through - dealt with below
+        break;
+      default:
+        break;
       }
     }
     final SqlWriter.Frame frame =
@@ -308,10 +324,17 @@ public abstract class SqlUtil {
       switch (call.getOperator().getSyntax()) {
       case FUNCTION_STAR:
         writer.sep("*");
+        break;
+      default:
+        break;
       }
     }
     for (SqlNode operand : call.getOperandList()) {
-      writer.sep(",");
+      if (ordered && operand instanceof SqlNodeList) {
+        writer.sep("ORDER BY");
+      } else {
+        writer.sep(",");
+      }
       operand.unparse(writer, 0, 0);
     }
     writer.endList(frame);
@@ -418,6 +441,7 @@ public abstract class SqlUtil {
    * types.
    *
    * @param opTab         operator table to search
+   * @param typeFactory   Type factory
    * @param funcName      name of function being invoked
    * @param argTypes      argument types
    * @param argNames      argument names, or null if call by position
@@ -431,6 +455,7 @@ public abstract class SqlUtil {
    * @see Glossary#SQL99 SQL:1999 Part 2 Section 10.4
    */
   public static SqlOperator lookupRoutine(SqlOperatorTable opTab,
+      RelDataTypeFactory typeFactory,
       SqlIdentifier funcName, List<RelDataType> argTypes,
       List<String> argNames, SqlFunctionCategory category,
       SqlSyntax syntax, SqlKind sqlKind, SqlNameMatcher nameMatcher,
@@ -438,6 +463,7 @@ public abstract class SqlUtil {
     Iterator<SqlOperator> list =
         lookupSubjectRoutines(
             opTab,
+            typeFactory,
             funcName,
             argTypes,
             argNames,
@@ -463,6 +489,7 @@ public abstract class SqlUtil {
    * Looks up all subject routines matching the given name and argument types.
    *
    * @param opTab       operator table to search
+   * @param typeFactory Type factory
    * @param funcName    name of function being invoked
    * @param argTypes    argument types
    * @param argNames    argument names, or null if call by position
@@ -476,14 +503,10 @@ public abstract class SqlUtil {
    * @see Glossary#SQL99 SQL:1999 Part 2 Section 10.4
    */
   public static Iterator<SqlOperator> lookupSubjectRoutines(
-      SqlOperatorTable opTab,
-      SqlIdentifier funcName,
-      List<RelDataType> argTypes,
-      List<String> argNames,
-      SqlSyntax sqlSyntax,
-      SqlKind sqlKind,
-      SqlFunctionCategory category,
-      SqlNameMatcher nameMatcher,
+      SqlOperatorTable opTab, RelDataTypeFactory typeFactory,
+      SqlIdentifier funcName, List<RelDataType> argTypes, List<String> argNames,
+      SqlSyntax sqlSyntax, SqlKind sqlKind,
+      SqlFunctionCategory category, SqlNameMatcher nameMatcher,
       boolean coerce) {
     // start with all routines matching by name
     Iterator<SqlOperator> routines =
@@ -503,7 +526,8 @@ public abstract class SqlUtil {
     // second pass:  eliminate routines which don't accept the given
     // argument types and parameter names if specified
     routines =
-        filterRoutinesByParameterTypeAndName(sqlSyntax, routines, argTypes, argNames, coerce);
+        filterRoutinesByParameterTypeAndName(typeFactory, sqlSyntax, routines,
+            argTypes, argNames, coerce);
 
     // see if we can stop now; this is necessary for the case
     // of builtin functions where we don't have param type info,
@@ -517,7 +541,7 @@ public abstract class SqlUtil {
     // third pass:  for each parameter from left to right, eliminate
     // all routines except those with the best precedence match for
     // the given arguments
-    routines = filterRoutinesByTypePrecedence(sqlSyntax, routines, argTypes, argNames);
+    routines = filterRoutinesByTypePrecedence(sqlSyntax, typeFactory, routines, argTypes, argNames);
 
     // fourth pass: eliminate routines which do not have the same
     // SqlKind as requested
@@ -581,14 +605,15 @@ public abstract class SqlUtil {
   }
 
   /**
+   * Filters an iterator of routines, keeping only those that have the required
+   * argument types and names.
+   *
    * @see Glossary#SQL99 SQL:1999 Part 2 Section 10.4 Syntax Rule 6.b.iii.2.B
    */
   private static Iterator<SqlOperator> filterRoutinesByParameterTypeAndName(
-      SqlSyntax syntax,
-      final Iterator<SqlOperator> routines,
-      final List<RelDataType> argTypes,
-      final List<String> argNames,
-      final boolean coerce) {
+      RelDataTypeFactory typeFactory, SqlSyntax syntax,
+      final Iterator<SqlOperator> routines, final List<RelDataType> argTypes,
+      final List<String> argNames, final boolean coerce) {
     if (syntax != SqlSyntax.FUNCTION) {
       return routines;
     }
@@ -597,15 +622,20 @@ public abstract class SqlUtil {
     return (Iterator) Iterators.filter(
         Iterators.filter(routines, SqlFunction.class),
         function -> {
-          List<RelDataType> paramTypes = function.getParamTypes();
-          if (paramTypes == null) {
+          if (Objects.requireNonNull(function).getOperandTypeChecker() == null
+              || !function.getOperandTypeChecker().isFixedParameters()) {
             // no parameter information for builtins; keep for now,
             // the type coerce will not work here.
             return true;
           }
+          final SqlOperandMetadata operandMetadata =
+              (SqlOperandMetadata) function.getOperandTypeChecker();
+          final List<RelDataType> paramTypes =
+              operandMetadata.paramTypes(typeFactory);
           final List<RelDataType> permutedArgTypes;
           if (argNames != null) {
-            permutedArgTypes = permuteArgTypes(function, argNames, argTypes);
+            final List<String> paramNames = operandMetadata.paramNames();
+            permutedArgTypes = permuteArgTypes(paramNames, argNames, argTypes);
             if (permutedArgTypes == null) {
               return false;
             }
@@ -631,19 +661,19 @@ public abstract class SqlUtil {
   /**
    * Permutes argument types to correspond to the order of parameter names.
    */
-  private static List<RelDataType> permuteArgTypes(SqlFunction function,
+  private static List<RelDataType> permuteArgTypes(List<String> paramNames,
       List<String> argNames, List<RelDataType> argTypes) {
     // Arguments passed by name. Make sure that the function has
     // parameters of all of these names.
     Map<Integer, Integer> map = new HashMap<>();
     for (Ord<String> argName : Ord.zip(argNames)) {
-      int i = function.getParamNames().indexOf(argName.e);
+      int i = paramNames.indexOf(argName.e);
       if (i < 0) {
         return null;
       }
       map.put(i, argName.i);
     }
-    return Functions.generate(function.getParamTypes().size(), index -> {
+    return Functions.generate(paramNames.size(), index -> {
       if (map.containsKey(index)) {
         return argTypes.get(map.get(index));
       } else {
@@ -653,10 +683,14 @@ public abstract class SqlUtil {
   }
 
   /**
+   * Filters an iterator of routines, keeping only those with the best match for
+   * the actual argument types.
+   *
    * @see Glossary#SQL99 SQL:1999 Part 2 Section 9.4
    */
   private static Iterator<SqlOperator> filterRoutinesByTypePrecedence(
       SqlSyntax sqlSyntax,
+      RelDataTypeFactory typeFactory,
       Iterator<SqlOperator> routines,
       List<RelDataType> argTypes,
       List<String> argNames) {
@@ -670,16 +704,21 @@ public abstract class SqlUtil {
     for (final Ord<RelDataType> argType : Ord.zip(argTypes)) {
       final RelDataTypePrecedenceList precList =
           argType.e.getPrecedenceList();
-      final RelDataType bestMatch = bestMatch(sqlFunctions, argType.i, argNames, precList);
+      final RelDataType bestMatch =
+          bestMatch(typeFactory, sqlFunctions, argType.i, argNames, precList);
       if (bestMatch != null) {
         sqlFunctions = sqlFunctions.stream()
             .filter(function -> {
-              final List<RelDataType> paramTypes = function.getParamTypes();
-              if (paramTypes == null) {
+              if (!function.getOperandTypeChecker().isFixedParameters()) {
                 return false;
               }
+              final SqlOperandMetadata operandMetadata =
+                  (SqlOperandMetadata) function.getOperandTypeChecker();
+              final List<String> paramNames = operandMetadata.paramNames();
+              final List<RelDataType> paramTypes =
+                  operandMetadata.paramTypes(typeFactory);
               int index = argNames != null
-                  ? function.getParamNames().indexOf(argNames.get(argType.i))
+                  ? paramNames.indexOf(argNames.get(argType.i))
                   : argType.i;
               final RelDataType paramType = paramTypes.get(index);
               return precList.compareTypePrecedence(paramType, bestMatch) >= 0;
@@ -691,16 +730,21 @@ public abstract class SqlUtil {
     return (Iterator) sqlFunctions.iterator();
   }
 
-  private static RelDataType bestMatch(List<SqlFunction> sqlFunctions, int i,
+  private static RelDataType bestMatch(RelDataTypeFactory typeFactory,
+      List<SqlFunction> sqlFunctions, int i,
       List<String> argNames, RelDataTypePrecedenceList precList) {
     RelDataType bestMatch = null;
     for (SqlFunction function : sqlFunctions) {
-      List<RelDataType> paramTypes = function.getParamTypes();
-      if (paramTypes == null) {
+      if (!function.getOperandTypeChecker().isFixedParameters()) {
         continue;
       }
+      final SqlOperandMetadata operandMetadata =
+          (SqlOperandMetadata) function.getOperandTypeChecker();
+      final List<RelDataType> paramTypes =
+          operandMetadata.paramTypes(typeFactory);
+      final List<String> paramNames = operandMetadata.paramNames();
       final RelDataType paramType = argNames != null
-          ? paramTypes.get(function.getParamNames().indexOf(argNames.get(i)))
+          ? paramTypes.get(paramNames.indexOf(argNames.get(i)))
           : paramTypes.get(i);
       if (bestMatch == null) {
         bestMatch = paramType;
@@ -915,13 +959,13 @@ public abstract class SqlUtil {
       return "Big5";
     case "LATIN1":
       return "ISO-8859-1";
-    case "GB2312":
-    case "GBK":
-      return name;
     case "UTF8":
       return "UTF-8";
     case "UTF16":
+    case "UTF-16":
       return ConversionUtil.NATIVE_UTF16_CHARSET_NAME;
+    case "GB2312":
+    case "GBK":
     case "UTF-16BE":
     case "UTF-16LE":
     case "ISO-8859-1":
@@ -958,6 +1002,7 @@ public abstract class SqlUtil {
    * @throws RuntimeException If the given value cannot be represented in the
    *     given charset
    */
+  @SuppressWarnings("BetaApi")
   public static void validateCharset(ByteString value, Charset charset) {
     if (charset == StandardCharsets.UTF_8) {
       final byte[] bytes = value.getBytes();
@@ -1070,6 +1115,66 @@ public abstract class SqlUtil {
       return rel.attachHints(relHints);
     }
     return (RelNode) rel;
+  }
+
+  /** Creates a call to an operator.
+   *
+   * <p>Deals with the fact the AND and OR are binary. */
+  public static SqlNode createCall(SqlOperator op, SqlParserPos pos,
+      List<SqlNode> operands) {
+    switch (op.kind) {
+    case OR:
+    case AND:
+      // In RexNode trees, OR and AND have any number of children;
+      // SqlCall requires exactly 2. So, convert to a balanced binary
+      // tree for OR/AND, left-deep binary tree for others.
+      switch (operands.size()) {
+      case 0:
+        return SqlLiteral.createBoolean(op.kind == SqlKind.AND, pos);
+      case 1:
+        return operands.get(0);
+      default:
+        return createBalancedCall(op, pos, operands, 0, operands.size());
+      case 2:
+      case 3:
+      case 4:
+      case 5:
+        // fall through
+      }
+      // fall through
+      break;
+    default:
+      break;
+    }
+    if (op instanceof SqlBinaryOperator && operands.size() > 2) {
+      return createLeftCall(op, pos, operands);
+    }
+    return op.createCall(pos, operands);
+  }
+
+  private static SqlNode createLeftCall(SqlOperator op, SqlParserPos pos,
+      List<SqlNode> nodeList) {
+    SqlNode node = op.createCall(pos, nodeList.subList(0, 2));
+    for (int i = 2; i < nodeList.size(); i++) {
+      node = op.createCall(pos, node, nodeList.get(i));
+    }
+    return node;
+  }
+
+  /**
+   * Creates a balanced binary call from sql node list,
+   * start inclusive, end exclusive.
+   */
+  private static SqlNode createBalancedCall(SqlOperator op, SqlParserPos pos,
+      List<SqlNode> operands, int start, int end) {
+    assert start < end && end <= operands.size();
+    if (start + 1 == end) {
+      return operands.get(start);
+    }
+    int mid = (end - start) / 2 + start;
+    SqlNode leftNode = createBalancedCall(op, pos, operands, start, mid);
+    SqlNode rightNode = createBalancedCall(op, pos, operands, mid, end);
+    return op.createCall(pos, leftNode, rightNode);
   }
 
   //~ Inner Classes ----------------------------------------------------------

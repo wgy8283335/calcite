@@ -32,6 +32,7 @@ import org.apache.calcite.linq4j.tree.ConstantUntypedNull;
 import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.linq4j.tree.ExpressionType;
 import org.apache.calcite.linq4j.tree.Expressions;
+import org.apache.calcite.linq4j.tree.FunctionExpression;
 import org.apache.calcite.linq4j.tree.MethodCallExpression;
 import org.apache.calcite.linq4j.tree.MethodDeclaration;
 import org.apache.calcite.linq4j.tree.ParameterExpression;
@@ -47,6 +48,8 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexProgramBuilder;
 import org.apache.calcite.runtime.SortedMultiMap;
 import org.apache.calcite.runtime.SqlFunctions;
+import org.apache.calcite.runtime.Utilities;
+import org.apache.calcite.sql.SqlCollation;
 import org.apache.calcite.util.BuiltInMethod;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
@@ -58,11 +61,13 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.util.AbstractList;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -106,10 +111,10 @@ public class EnumUtils {
       final JavaTypeFactory typeFactory,
       final List<? extends RelDataType> inputTypes) {
     return new AbstractList<Type>() {
-      public Type get(int index) {
+      @Override public Type get(int index) {
         return EnumUtils.javaClass(typeFactory, inputTypes.get(index));
       }
-      public int size() {
+      @Override public int size() {
         return inputTypes.size();
       }
     };
@@ -121,13 +126,13 @@ public class EnumUtils {
       final List<Integer> argList) {
     final List<RelDataTypeField> inputFields = inputRowType.getFieldList();
     return new AbstractList<RelDataType>() {
-      public RelDataType get(int index) {
+      @Override public RelDataType get(int index) {
         final int arg = argList.get(index);
         return arg < inputFields.size()
             ? inputFields.get(arg).getType()
             : extraInputs.get(arg - inputFields.size()).getType();
       }
-      public int size() {
+      @Override public int size() {
         return argList.size();
       }
     };
@@ -289,12 +294,16 @@ public class EnumUtils {
   }
 
   private static Type toInternal(RelDataType type) {
+    return toInternal(type, false);
+  }
+
+  static Type toInternal(RelDataType type, boolean forceNotNull) {
     switch (type.getSqlTypeName()) {
     case DATE:
     case TIME:
-      return type.isNullable() ? Integer.class : int.class;
+      return type.isNullable() && !forceNotNull ? Integer.class : int.class;
     case TIMESTAMP:
-      return type.isNullable() ? Long.class : long.class;
+      return type.isNullable() && !forceNotNull ? Long.class : long.class;
     default:
       return null; // we don't care; use the default storage type
     }
@@ -314,7 +323,7 @@ public class EnumUtils {
    */
   public static Expression convert(Expression operand, Type toType) {
     final Type fromType = operand.getType();
-    return EnumUtils.convert(operand, fromType, toType);
+    return convert(operand, fromType, toType);
   }
 
   /**
@@ -534,6 +543,23 @@ public class EnumUtils {
     return Expressions.convert_(operand, toType);
   }
 
+  /** Converts a value to a given class. */
+  public static <T> T evaluate(Object o, Class<T> clazz) {
+    // We need optimization here for constant folding.
+    // Not all the expressions can be interpreted (e.g. ternary), so
+    // we rely on optimization capabilities to fold non-interpretable
+    // expressions.
+    //noinspection unchecked
+    clazz = Primitive.box(clazz);
+    BlockBuilder bb = new BlockBuilder();
+    final Expression expr =
+        convert(Expressions.constant(o), clazz);
+    bb.add(Expressions.return_(null, expr));
+    final FunctionExpression convert =
+        Expressions.lambda(bb.toBlock(), ImmutableList.of());
+    return clazz.cast(convert.compile().dynamicInvoke());
+  }
+
   private static boolean isA(Type fromType, Primitive primitive) {
     return Primitive.of(fromType) == primitive
         || Primitive.ofBox(fromType) == primitive;
@@ -586,7 +612,7 @@ public class EnumUtils {
   }
 
   /**
-   * Handle decimal type specifically with explicit type conversion
+   * Handles decimal type specifically with explicit type conversion.
    */
   private static Expression convertAssignableType(
       Expression argument, Type targetType) {
@@ -664,7 +690,8 @@ public class EnumUtils {
   }
 
   /**
-   * Match an argument expression to method parameter type with best effort
+   * Matches an argument expression to method parameter type with best effort.
+   *
    * @param argument Argument Expression
    * @param parameter Parameter type
    * @return Converted argument expression that matches the parameter type.
@@ -711,6 +738,8 @@ public class EnumUtils {
       return JoinType.SEMI;
     case ANTI:
       return JoinType.ANTI;
+    default:
+      break;
     }
     throw new IllegalStateException(
         "Unable to convert " + joinRelType + " to Linq4j JoinType");
@@ -761,7 +790,8 @@ public class EnumUtils {
       PhysType inputPhysType,
       PhysType outputPhysType,
       Expression wmColExpr,
-      Expression intervalExpr) {
+      Expression windowSizeExpr,
+      Expression offsetExpr) {
     // Generate all fields.
     final List<Expression> expressions = new ArrayList<>();
     // If input item is just a primitive, we do not generate specialized
@@ -777,30 +807,30 @@ public class EnumUtils {
       expressions.add(expression);
     }
     final Expression wmColExprToLong = EnumUtils.convert(wmColExpr, long.class);
-    final Expression shiftExpr = Expressions.constant(1, long.class);
 
-    // Find the fixed window for a timestamp given a window size and return the window start.
-    // Fixed windows counts from timestamp 0.
-    // wmMillis / intervalMillis * intervalMillis
-    expressions.add(
-        Expressions.multiply(
-            Expressions.divide(
-                wmColExprToLong,
-                intervalExpr),
-            intervalExpr));
-
-    // Find the fixed window for a timestamp given a window size and return the window end.
-    // Fixed windows counts from timestamp 0.
-
-    // (wmMillis / sizeMillis + 1L) * sizeMillis;
-    expressions.add(
-        Expressions.multiply(
+    // Find the fixed window for a timestamp given a window size and an offset, and return the
+    // window start.
+    // wmColExprToLong - (wmColExprToLong + windowSizeMillis - offsetMillis) % windowSizeMillis
+    Expression windowStartExpr = Expressions.subtract(
+        wmColExprToLong,
+        Expressions.modulo(
             Expressions.add(
-                Expressions.divide(
-                    wmColExprToLong,
-                    intervalExpr),
-                shiftExpr),
-            intervalExpr));
+                wmColExprToLong,
+            Expressions.subtract(
+                windowSizeExpr,
+                offsetExpr
+            )),
+            windowSizeExpr));
+
+    expressions.add(windowStartExpr);
+
+    // The window end equals to the window start plus window size.
+    // windowStartMillis + sizeMillis
+    Expression windowEndExpr = Expressions.add(
+        windowStartExpr,
+        windowSizeExpr);
+
+    expressions.add(windowEndExpr);
 
     return Expressions.lambda(
         Function1.class,
@@ -823,12 +853,13 @@ public class EnumUtils {
     };
   }
 
+  /** Enumerator that converts rows into sessions separated by gaps. */
   private static class SessionizationEnumerator implements Enumerator<Object[]> {
     private final Enumerator<Object[]> inputEnumerator;
     private final int indexOfWatermarkedColumn;
     private final int indexOfKeyColumn;
     private final long gap;
-    private LinkedList<Object[]> list;
+    private final Deque<Object[]> list;
     private boolean initialized;
 
     /**
@@ -846,7 +877,7 @@ public class EnumUtils {
       this.indexOfWatermarkedColumn = indexOfWatermarkedColumn;
       this.indexOfKeyColumn = indexOfKeyColumn;
       this.gap = gap;
-      list = new LinkedList<>();
+      list = new ArrayDeque<>();
       initialized = false;
     }
 
@@ -954,21 +985,23 @@ public class EnumUtils {
    * enumerator and produces at least one element for each input element.
    */
   public static Enumerable<Object[]> hopping(Enumerator<Object[]> inputEnumerator,
-      int indexOfWatermarkedColumn, long emitFrequency, long intervalSize) {
+      int indexOfWatermarkedColumn, long emitFrequency, long windowSize, long offset) {
     return new AbstractEnumerable<Object[]>() {
       @Override public Enumerator<Object[]> enumerator() {
         return new HopEnumerator(inputEnumerator,
-            indexOfWatermarkedColumn, emitFrequency, intervalSize);
+            indexOfWatermarkedColumn, emitFrequency, windowSize, offset);
       }
     };
   }
 
+  /** Enumerator that computes HOP. */
   private static class HopEnumerator implements Enumerator<Object[]> {
     private final Enumerator<Object[]> inputEnumerator;
     private final int indexOfWatermarkedColumn;
     private final long emitFrequency;
-    private final long intervalSize;
-    private LinkedList<Object[]> list;
+    private final long windowSize;
+    private final long offset;
+    private final Deque<Object[]> list;
 
     /**
      * Note that it only works for batch scenario. E.g. all data is known and there is no late data.
@@ -976,24 +1009,26 @@ public class EnumUtils {
      * @param inputEnumerator the enumerator to provide an array of objects as input
      * @param indexOfWatermarkedColumn the index of timestamp column upon which a watermark is built
      * @param slide sliding size
-     * @param intervalSize window size
+     * @param windowSize window size
+     * @param offset indicates how much windows should off
      */
     HopEnumerator(Enumerator<Object[]> inputEnumerator,
-        int indexOfWatermarkedColumn, long slide, long intervalSize) {
+        int indexOfWatermarkedColumn, long slide, long windowSize, long offset) {
       this.inputEnumerator = inputEnumerator;
       this.indexOfWatermarkedColumn = indexOfWatermarkedColumn;
       this.emitFrequency = slide;
-      this.intervalSize = intervalSize;
-      list = new LinkedList<>();
+      this.windowSize = windowSize;
+      this.offset = offset;
+      list = new ArrayDeque<>();
     }
 
-    public Object[] current() {
+    @Override public Object[] current() {
       if (list.size() > 0) {
         return takeOne();
       } else {
         Object[] current = inputEnumerator.current();
         List<Pair> windows = hopWindows(SqlFunctions.toLong(current[indexOfWatermarkedColumn]),
-            emitFrequency, intervalSize);
+            emitFrequency, windowSize, offset);
         for (Pair window : windows) {
           Object[] curWithWindow = new Object[current.length + 2];
           System.arraycopy(current, 0, curWithWindow, 0, current.length);
@@ -1005,16 +1040,16 @@ public class EnumUtils {
       }
     }
 
-    public boolean moveNext() {
+    @Override public boolean moveNext() {
       return list.size() > 0 || inputEnumerator.moveNext();
     }
 
-    public void reset() {
+    @Override public void reset() {
       inputEnumerator.reset();
       list.clear();
     }
 
-    public void close() {
+    @Override public void close() {
     }
 
     private Object[] takeOne() {
@@ -1022,9 +1057,10 @@ public class EnumUtils {
     }
   }
 
-  private static List<Pair> hopWindows(long tsMillis, long periodMillis, long sizeMillis) {
+  private static List<Pair> hopWindows(
+      long tsMillis, long periodMillis, long sizeMillis, long offsetMillis) {
     ArrayList<Pair> ret = new ArrayList<>(Math.toIntExact(sizeMillis / periodMillis));
-    long lastStart = tsMillis - ((tsMillis + periodMillis) % periodMillis);
+    long lastStart = tsMillis - ((tsMillis + periodMillis - offsetMillis) % periodMillis);
     for (long start = lastStart;
          start > tsMillis - sizeMillis;
          start -= periodMillis) {
@@ -1046,22 +1082,46 @@ public class EnumUtils {
         return new Enumerator<TResult>() {
           Enumerator<TSource> inputs = inputEnumerable.enumerator();
 
-          public TResult current() {
+          @Override public TResult current() {
             return outSelector.apply(inputs.current());
           }
 
-          public boolean moveNext() {
+          @Override public boolean moveNext() {
             return inputs.moveNext();
           }
 
-          public void reset() {
+          @Override public void reset() {
             inputs.reset();
           }
 
-          public void close() {
+          @Override public void close() {
           }
         };
       }
     };
+  }
+
+  public static Expression generateCollatorExpression(SqlCollation collation) {
+    if (collation == null || collation.getCollator() == null) {
+      return null;
+    }
+
+    // Utilities.generateCollator(
+    //      new Locale(
+    //          collation.getLocale().getLanguage(),
+    //          collation.getLocale().getCountry(),
+    //          collation.getLocale().getVariant()),
+    //      collation.getCollator().getStrength());
+    final Locale locale = collation.getLocale();
+    final int strength = collation.getCollator().getStrength();
+    return Expressions.call(
+        Utilities.class,
+        "generateCollator",
+        Expressions.new_(
+            Locale.class,
+            Expressions.constant(locale.getLanguage()),
+            Expressions.constant(locale.getCountry()),
+            Expressions.constant(locale.getVariant())),
+        Expressions.constant(strength));
   }
 }
